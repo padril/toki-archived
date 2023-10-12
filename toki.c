@@ -7,6 +7,9 @@
 #include <assert.h>
 
 
+#define DEBUG_MODE 0
+#define DELETE_INTERMEDIATE 1
+
 // Next refactor/cleanup milestone:
 // Working "Hello, world!" program!
 
@@ -231,7 +234,7 @@ TokenList evaluate(LexemeList input)
             size = sizeof(LiteralType) + (str_size) * sizeof(char);
             value = malloc(size);
             strncpy(value + LITERAL_OFFSET(char), q, str_size);
-            ((char*) value)[0] = (char) LITERAL_STRING;
+            ((LiteralType*) value)[0] = LITERAL_STRING;
             ((char*) value)[size] = '\0';
             tokens[tokens_size] = (Token) {
                 .type = type,
@@ -428,9 +431,176 @@ SentenceList parse(TokenList input) {
     };
 }
 
-void parseVP() {
 
+/////////////
+// Compile //
+/////////////
+
+typedef struct SectionData {
+    // TODO: currently we can just keep strings, but in the future it might be
+    // better to keep more abstract data to be dealt with in write(). might
+    // allow type inference? if that's a feature we want?
+    const char** lines;
+    size_t size;
+    int literals;
+} SectionData;
+
+typedef struct SectionText {
+    // TODO: this should also be more abstract, maybe make it subdivided into
+    // each seperate label? could be easier to organize readable ASM and
+    // include library functions and default parameters in the future.
+    const char** lines;
+    size_t size;
+} SectionText;
+
+
+void compile_sentence(Sentence s, SectionData* data, SectionText* text)
+{
+    if (s.subject.noun.type == TOKEN_NULL) {
+        // TODO: better error handling
+        if (s.predicate.verb.type == TOKEN_NULL) {
+            fprintf(
+                stderr,
+                "Missing verb in sentence.\n"
+            );
+            exit(1);
+        // else if (declarative) { error }
+        // could really be a nice succinct switch statement probably
+        } else if (s.predicate.verb.type == TOKEN_KEYWORD &&
+                   (* (Keyword*) s.predicate.verb.value
+                    == KEYWORD_SITELEN) ) {
+            if (s.predicate.object.noun.type == TOKEN_LITERAL &&
+                (* (LiteralType*) s.predicate.object.noun.value
+                 == LITERAL_STRING) ) {
+                // Generate data
+                char* dataline = malloc(81 * sizeof(char));
+                sprintf(dataline,
+                    "LITERAL_%d db \"%s\", 0",
+                    data->literals,
+                    ((char*) s.predicate.object.noun.value)
+                    + LITERAL_OFFSET(char)
+                );
+                data->lines[data->size] = dataline;
+                ++data->size;
+
+                // Generate 
+                char* textline1 = malloc(81 * sizeof(char));
+                char* textline2 = malloc(81 * sizeof(char));
+                char* textline3 = malloc(81 * sizeof(char));
+                sprintf(textline1,
+                    "push    LITERAL_%d",
+                    data->literals
+                );
+                sprintf(textline2,
+                    "call    _printf"
+                );
+                sprintf(textline3,
+                    "add     esp, 4"
+                );
+                text->lines[text->size] = textline1;
+                ++text->size;
+                text->lines[text->size] = textline2;
+                ++text->size;
+                text->lines[text->size] = textline3;
+                ++text->size;
+
+                ++data->literals;
+            } else {
+                fprintf(
+                    stderr,
+                    "Incorrect object for verb 'sitelen'.\n"
+                );
+                exit(1);
+            }
+        }
+    }
 }
+
+
+void write(const char* outfile, SectionData sd, SectionText st)
+{
+    char* fname = malloc(80 * sizeof(char));
+    strcpy(fname, outfile);
+    strcat(fname, ".asm");
+
+    FILE* fptr = fopen(fname, "w");
+
+    // opening boilerplate
+    fprintf(fptr,
+    "    global _main\n"
+    "    extern _printf\n\n"
+    "section .text\n"
+    "    _main:\n"
+    );
+
+    // _main:
+    for (int i = 0; i < st.size; ++i) {
+        fprintf(fptr, "        %s\n", st.lines[i]);
+    }
+
+    // end .text boilerplate
+    fprintf(fptr,
+    "        ret\n\n"
+    );
+
+
+    // .data boilerplate
+    fprintf(fptr,
+    "section .data\n"
+    );
+
+    // .data:
+    for (int i = 0; i < sd.size; ++i) {
+        fprintf(fptr, "    %s\n", sd.lines[i]);
+    }
+
+    fclose(fptr);
+}
+
+void make(const char* outfile)
+{
+    char* cmd1 = malloc(80 * sizeof(const char));
+    char* cmd2 = malloc(80 * sizeof(const char));
+    sprintf(cmd1, "nasm -f win32 %s.asm", outfile);
+    sprintf(cmd2, "gcc %s.obj -o %s", outfile, outfile);
+    system(cmd1);
+    system(cmd2);
+
+#if DELETE_INTERMEDIATE
+    char* cmd3 = malloc(80 * sizeof(const char));
+    char* cmd4 = malloc(80 * sizeof(const char));
+    sprintf(cmd3, "del %s.asm", outfile);
+    sprintf(cmd4, "del %s.obj", outfile);
+    system(cmd3);
+    system(cmd4);
+#endif
+}
+
+
+void compile(const char* outfile, SentenceList input)
+{
+    SectionData sd;
+    SectionText st;
+
+    sd.lines = malloc(100 * sizeof(const char*));
+    sd.size = 0;
+    st.lines = malloc(100 * sizeof(const char*));
+    st.size = 0;
+
+    // Convert SentenceList to SectionData and SectionText
+    for (int i = 0; i < input.size; ++i) {
+        compile_sentence(input.list[i], &sd, &st);
+    }
+
+    write(outfile, sd, st);
+    make(outfile);
+}
+
+
+/////////////
+// Display //
+/////////////
+
 
 void printToken(Token t) {
     switch (t.type) {
@@ -468,8 +638,13 @@ void printToken(Token t) {
 
 int main(int argc, char* argv[])
 {
+
+#if DEBUG_MODE
+    const char* outfname = "hello";
+    const char* fname = "hello.toki";
+#else
     // check number of arguments
-    if (argc != 2) {
+    if (argc != 3) {
         fprintf(
             stderr,
             "Incorrect number of arguments (expected 1 got %d).\n",
@@ -479,8 +654,15 @@ int main(int argc, char* argv[])
         exit(1);
     }
     
-    // open file
+    // asm file
     const char* fname = argv[1];
+    char outfname_buffer[80]; // Adjust the buffer size as needed
+    strcpy(outfname_buffer, argv[2]);
+    strcat(outfname_buffer, ".asm");
+    const char* outfname = outfname_buffer;
+#endif
+
+    // open file
     FILE* fptr = fopen(fname, "r");
 
     // check file existed
@@ -502,7 +684,9 @@ int main(int argc, char* argv[])
     LexemeList lexemes = scan(str);
     TokenList tokens = evaluate(lexemes);
     SentenceList sentences = parse(tokens);
+    compile(outfname, sentences);
 
+    /*
     for (int i = 0; i < sentences.size; ++i) {
         printf("[S\n");
             printf("\t[N\n\t\t");
@@ -517,7 +701,7 @@ int main(int argc, char* argv[])
                 printf("\t\t]\n");
             printf("\t]\n");
         printf("]\n");
-    }
+    }*/
 
     /*
     // print token list
@@ -547,6 +731,8 @@ int main(int argc, char* argv[])
         }
     }
     */
+
+    fclose(fptr);
 
     exit(0);
 }
