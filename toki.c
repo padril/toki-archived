@@ -656,10 +656,7 @@ int main(int argc, char* argv[])
     
     // asm file
     const char* fname = argv[1];
-    char outfname_buffer[80]; // Adjust the buffer size as needed
-    strcpy(outfname_buffer, argv[2]);
-    strcat(outfname_buffer, ".asm");
-    const char* outfname = outfname_buffer;
+    const char* outfname = argv[2];
 #endif
 
     // open file
