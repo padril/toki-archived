@@ -1,3 +1,5 @@
 *.exe
 *.asm
 *.obj
+
+.vscode
