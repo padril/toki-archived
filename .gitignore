@@ -1,4 +1,3 @@
-toki.exe
-hello.asm
-hello.obj
-hello.exe
+*.exe
+*.asm
+*.obj
