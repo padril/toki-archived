@@ -1,12 +1,18 @@
 // Copyright 2023 Leo James Peckham (padril)
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <ctype.h>
 #include <assert.h>
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-#define DEBUG_MODE 0
+#define REQUIRE_INPUT_FILES 0
+
+#if !(REQUIRE_INPUT_FILES)
+    #define DEFAULT_INPUT_FILE "hello.c"
+    #define DEFAULT_OUTPUT_NAME "hello"
+#endif
+
 #define DELETE_INTERMEDIATE 1
 
 // Next refactor/cleanup milestone:
@@ -248,7 +254,7 @@ TokenList evaluate(LexemeList input)
             // +1 to make room for type byte
             size = sizeof(LiteralType) + (str_size) * sizeof(char);
             value = malloc(size);
-            strncpy(value + LITERAL_OFFSET(char), q, str_size);
+            strncpy((char*) value + LITERAL_OFFSET(char), q, str_size);
             ((LiteralType *)value)[0] = LITERAL_STRING;
             ((char *)value)[size] = '\0';
             tokens[tokens_size] = (Token){
@@ -349,7 +355,6 @@ SentenceList parse(TokenList input)
     size_t size = 0;
 
     Token *p = input.list;
-    Token *q = input.list;
 
     // We use modes, and switch between them, updating as we go, to go with
     // the arbitrary way toki pona phrases can be ordered.
@@ -568,7 +573,7 @@ void compile_sentence(Sentence s, SectionData *data, SectionText *text)
     }
 }
 
-void write(const char *outfile, SectionData *sd, SectionText *st)
+void write(const char *outfile, const SectionData *sd, const SectionText *st)
 {
     char *fname = malloc(80 * sizeof(char));
     strcpy(fname, outfile);
