@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <ctype.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -145,25 +146,26 @@ const TokenList TokenList_default = (TokenList) {
  * VP holds V (AdvP+) (NP)
  * S  holds (NP) (VP)  (N.B a lone NP or doesn't do anything! could be useful
  *                      for a REPL in the future though...)
+ * 
+ * These use a lot of short forms because in later code it gets verbose.
  */
 typedef struct NounPhrase
 {
-    Token noun;
-    TokenList adjp;
+    Token noun;       // noun
+    TokenList adjp;   // adjective phrase
 } NounPhrase;
 
 typedef struct VerbPhrase
 {
-    Token verb;
-    TokenList advp;
-    NounPhrase object;
+    Token verb;       // verb
+    TokenList advp;   // adverb phrase
+    NounPhrase obj;   // object
 } VerbPhrase;
 
 typedef struct Sentence
 {
-    NounPhrase subject;
-    VerbPhrase predicate;
-    // tense? aspect? mood? li vs o distinction might go here later
+    NounPhrase subj;  // subject
+    VerbPhrase pred;  // predicate
 } Sentence;
 
 typedef struct SentenceList
@@ -189,6 +191,23 @@ typedef struct SectionText
     size_t size;
 } SectionText;
 
+// HELPER FUNCTIONS
+
+static inline bool is_keyword(Token t, Keyword kw) {
+    return (t.type == TOKEN_KEYWORD) &&
+           (* (Keyword *) t.value == kw);
+}
+
+static inline bool is_seperator(Token t, Separator sp) {
+    return (t.type == TOKEN_SEPARATOR) &&
+           (* (Separator *) t.value == sp);
+}
+
+static inline bool is_literal(Token t, Literal lt) {
+    return (t.type == TOKEN_LITERAL) &&
+           (* (Literal *) t.value == lt);
+}
+
 // LEXICAL ANALYSIS
 
 /* Begins the process of Lexical Analysis by generating a list of Lexemes
@@ -197,19 +216,21 @@ typedef struct SectionText
  */
 LexemeList scan(const char *input)
 {
-    typedef enum Mode
+    // Match denotes what the current Lexeme being analyzed could match
+    typedef enum Match
     {
         UNKNOWN,
         TEXT,
         STRING,
         END,
-    } Mode;
+    } Match;
 
     Lexeme *lexemes = malloc(1000 * sizeof(Lexeme));
-    int lexemes_size = 0;
+    size_t lexemes_size = 0;
     Lexeme lex;
-    Mode mode = UNKNOWN;
-    const char *p = input, *q = input;
+    Match mode = UNKNOWN;
+    const char *p = input;  // start of the lexeme
+    const char *q = input;  // end of the lexeme
     int ln = 0;
     int col = 0;
 
@@ -220,7 +241,7 @@ LexemeList scan(const char *input)
         {
             if (isspace(*p) || iscntrl(*p))
             {
-                ; // do nothing!
+                ; // do nothing, whitespace
             }
             else if (isalpha(*p))
             {
@@ -267,6 +288,7 @@ LexemeList scan(const char *input)
             }
             else if (isalnum(*p))
             {
+                ; // continue to next
             }
         }
         else if (mode == STRING)
@@ -278,7 +300,7 @@ LexemeList scan(const char *input)
             else if (*p == '"')
             {
                 // construct string
-                int str_size = p - q + 1; // plut one to include close quote
+                int str_size = p - q + 1; // plus one to include close quote
                 char *text = malloc((str_size + 1) * sizeof(char));
                 strncpy(text, q, str_size);
                 text[str_size] = '\0';
@@ -299,7 +321,7 @@ LexemeList scan(const char *input)
         ++p;
     }
 
-    return (LexemeList){.list = lexemes, .size = lexemes_size};
+    return (LexemeList) {.list = lexemes, .size = lexemes_size};
 }
 
 /* Completes the process of Lexical Analysis by evaluating a list of Lexemes
@@ -314,9 +336,7 @@ TokenList evaluate(LexemeList input)
 
     for (int lex = 0; lex < input.size; ++lex)
     {
-        TokenType type = TOKEN_NULL;
-        void *value = NULL;
-        size_t size = 0;
+        Token curr = Token_default;
 
         // keyword and identifier
         // TODO: replace with binsearch, or hash
@@ -325,19 +345,16 @@ TokenList evaluate(LexemeList input)
         {
             if (!strcmp(lexemes[lex], KEYWORDS[kw]))
             {
-                type = TOKEN_KEYWORD;
-                size = sizeof(Keyword);
-                value = malloc(size);
-                *(Keyword *)value = (Keyword)kw;
+                curr.type = TOKEN_KEYWORD;
+                curr.size = sizeof(Keyword);
+                curr.value = malloc(curr.size);
+                *(Keyword *) curr.value = (Keyword) kw;
                 break;
             }
         }
-        if (type != TOKEN_NULL)
+        if (curr.type != TOKEN_NULL)
         {
-            tokens[tokens_size] = (Token){
-                .type = type,
-                .value = value,
-                .size = size};
+            tokens[tokens_size] = curr;
             ++tokens_size;
             continue;
         }
@@ -346,7 +363,7 @@ TokenList evaluate(LexemeList input)
 
         if (lexemes[lex][0] == '"')
         {
-            type = TOKEN_LITERAL;
+            curr.type = TOKEN_LITERAL;
             const char *p = lexemes[lex] + 1, *q = lexemes[lex] + 1;
             while (*p != '"')
             {
@@ -354,15 +371,12 @@ TokenList evaluate(LexemeList input)
             }
             int str_size = p - q; // no +1 to get rid of end quote
             // +1 to make room for type byte
-            size = sizeof(Literal) + (str_size) * sizeof(char);
-            value = malloc(size);
-            strncpy((char *) ((Literal *) value + 1), q, str_size);
-            ((Literal *) value)[0] = LITERAL_STRING;
-            ((char *)value)[size] = '\0';
-            tokens[tokens_size] = (Token){
-                .type = type,
-                .value = value,
-                .size = size};
+            curr.size = sizeof(Literal) + (str_size) * sizeof(char);
+            curr.value = malloc(curr.size);
+            strncpy((char *) ((Literal *) curr.value + 1), q, str_size);
+            ((Literal *) curr.value)[0] = LITERAL_STRING;
+            ((char *) curr.value)[curr.size] = '\0';
+            tokens[tokens_size] = curr;
             ++tokens_size;
             continue;
         }
@@ -373,19 +387,16 @@ TokenList evaluate(LexemeList input)
         {
             if (!strcmp(lexemes[lex], SEPARATORS[sp]))
             {
-                type = TOKEN_SEPARATOR;
-                size = sizeof(Separator);
-                value = malloc(size);
-                *(Separator *)value = (Separator)sp;
+                curr.type = TOKEN_SEPARATOR;
+                curr.size = sizeof(Separator);
+                curr.value = malloc(curr.size);
+                * (Separator *) curr.value = (Separator)sp;
                 break;
             }
         }
-        if (type != TOKEN_NULL)
+        if (curr.type != TOKEN_NULL)
         {
-            tokens[tokens_size] = (Token){
-                .type = type,
-                .value = value,
-                .size = size};
+            tokens[tokens_size] = curr;
             ++tokens_size;
             continue;
         }
@@ -435,25 +446,24 @@ SentenceList parse(TokenList input)
     // >>> e "Hello, " o sitelen e "world!".
     for (int i = 0; i < input.size; ++i)
     {
-        if (p->type == TOKEN_KEYWORD &&
-            *(Keyword *)p->value == KEYWORD_O)
+        if (is_keyword(*p, KEYWORD_O))
         {
             if (mode == PHRASE_EN)
             {
                 if (block.size == 0)
                 {
-                    s.subject.noun = Token_default;
-                    s.subject.adjp = TokenList_default;
+                    s.subj.noun = Token_default;
+                    s.subj.adjp = TokenList_default;
                 }
                 else if (block.size == 1)
                 {
-                    s.subject.noun = block.list[0];
-                    s.subject.adjp = TokenList_default;
+                    s.subj.noun = block.list[0];
+                    s.subj.adjp = TokenList_default;
                 }
                 else
                 {
-                    s.subject.noun = block.list[0];
-                    s.subject.adjp = (TokenList){
+                    s.subj.noun = block.list[0];
+                    s.subj.adjp = (TokenList) {
                         .list = block.list + 1,
                         .size = block.size - 1};
                 }
@@ -468,8 +478,7 @@ SentenceList parse(TokenList input)
             block.list = malloc(10 * sizeof(Token));
             block.size = 0;
         }
-        else if (p->type == TOKEN_KEYWORD &&
-                 *(Keyword *)p->value == KEYWORD_E)
+        else if (is_keyword(*p, KEYWORD_E))
         {
             if (mode == PHRASE_EN)
             {
@@ -481,18 +490,18 @@ SentenceList parse(TokenList input)
             {
                 if (block.size == 0)
                 {
-                    s.predicate.verb = Token_default;
-                    s.predicate.advp = TokenList_default;
+                    s.pred.verb = Token_default;
+                    s.pred.advp = TokenList_default;
                 }
                 else if (block.size == 1)
                 {
-                    s.predicate.verb = block.list[0];
-                    s.predicate.advp = TokenList_default;
+                    s.pred.verb = block.list[0];
+                    s.pred.advp = TokenList_default;
                 }
                 else
                 {
-                    s.predicate.verb = block.list[0];
-                    s.predicate.advp = (TokenList){
+                    s.pred.verb = block.list[0];
+                    s.pred.advp = (TokenList) {
                         .list = block.list + 1,
                         .size = block.size - 1};
                 }
@@ -501,26 +510,25 @@ SentenceList parse(TokenList input)
             block.list = malloc(10 * sizeof(Token));
             block.size = 0;
         }
-        else if (p->type == TOKEN_SEPARATOR &&
-                 *(Separator *)p->value == SEPARATOR_PERIOD)
+        else if (is_seperator(*p, SEPARATOR_PERIOD))
         {
 
             if (mode == PHRASE_E)
             {
                 if (block.size == 0)
                 {
-                    s.predicate.object.noun = Token_default;
-                    s.predicate.object.adjp = TokenList_default;
+                    s.pred.obj.noun = Token_default;
+                    s.pred.obj.adjp = TokenList_default;
                 }
                 else if (block.size == 1)
                 {
-                    s.predicate.object.noun = block.list[0];
-                    s.predicate.object.adjp = TokenList_default;
+                    s.pred.obj.noun = block.list[0];
+                    s.pred.obj.adjp = TokenList_default;
                 }
                 else
                 {
-                    s.predicate.object.noun = block.list[0];
-                    s.predicate.object.adjp = (TokenList){
+                    s.pred.obj.noun = block.list[0];
+                    s.pred.obj.adjp = (TokenList) {
                         .list = block.list + 1,
                         .size = block.size - 1};
                 }
@@ -547,7 +555,7 @@ SentenceList parse(TokenList input)
         free(block.list);
     }
 
-    return (SentenceList){
+    return (SentenceList) {
         .list = sl,
         .size = size};
 }
@@ -560,10 +568,10 @@ SentenceList parse(TokenList input)
  */
 void compile_sentence(Sentence s, SectionData *data, SectionText *text)
 {
-    if (s.subject.noun.type == TOKEN_NULL)
+    if (s.subj.noun.type == TOKEN_NULL)
     {
         // TODO: better error handling
-        if (s.predicate.verb.type == TOKEN_NULL)
+        if (s.pred.verb.type == TOKEN_NULL)
         {
             fprintf(
                 stderr,
@@ -572,18 +580,17 @@ void compile_sentence(Sentence s, SectionData *data, SectionText *text)
             // else if (declarative) { error }
             // could really be a nice succinct switch statement probably
         }
-        else if (s.predicate.verb.type == TOKEN_KEYWORD &&
-                 (*(Keyword *)s.predicate.verb.value == KEYWORD_SITELEN))
+        else if (is_keyword((s.pred.verb), KEYWORD_SITELEN))
         {
-            if (s.predicate.object.noun.type == TOKEN_LITERAL &&
-                (*(Literal *)s.predicate.object.noun.value == LITERAL_STRING))
+            if (is_literal(s.pred.obj.noun, LITERAL_STRING))
             {
                 // Generate data
                 char *dataline = malloc(81 * sizeof(char));
                 sprintf(dataline,
                         "LITERAL_%d db \"%s\", 0",
                         data->literals,
-                        (char *) ((Literal *) s.predicate.object.noun.value + 1) );
+                        (char *) ((Literal *) s.pred.obj.noun.value + 1)
+                        );
                 data->lines[data->size] = dataline;
                 ++data->size;
 
