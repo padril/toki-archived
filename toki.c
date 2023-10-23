@@ -6,73 +6,110 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define REQUIRE_INPUT_FILES 0
+// FLAG DEFINITIONS
 
-#if !(REQUIRE_INPUT_FILES)
-    #define DEFAULT_INPUT_FILE "hello.c"
-    #define DEFAULT_OUTPUT_NAME "hello"
+/* Lets the program know if command line arguments are going to be provided,
+ * or if the default values should be used. Useful for the debugger.
+ */
+#define REQUIRE_COMMAND_LINE_ARGS 1
+#if !(REQUIRE_COMMAND_LINE_ARGS)
+    #define DEFAULT_INPUT_FILENAME "hello.c"
+    #define DEFAULT_OUTPUT_FILENAME "hello"
 #endif
 
+/* When set to 1, will delete generated .asm and .obj files. Turn off if
+ * you want to keep the files (e.g. to debug ASM code)
+ */
 #define DELETE_INTERMEDIATE 1
 
-// Next refactor/cleanup milestone:
-// Working "Hello, world!" program!
+// GRAMMAR DEFINITIONS
 
-//////////////
-// TOKENIZE //
-//////////////
-
-typedef enum Keyword
-{
-    KEYWORD_O,
-    KEYWORD_SITELEN,
-    KEYWORD_TOKI,
-    KEYWORD_E,
-} Keyword;
-
-const char *keywords[] = {
-    "o",
-    "sitelen",
-    "toki",
-    "e",
-};
-
-const int KEYWORD_COUNT = sizeof(keywords) / sizeof(const char *);
-
-typedef enum Seperator
-{
-    SEPERATOR_PERIOD,
-} Seperator;
-
-const char *seperators[] = {
-    ".",
-};
-
-const int SEPERATOR_COUNT = sizeof(seperators) / sizeof(const char *);
-
-typedef const char *Lexeme;
-
-typedef enum TokenType
-{
-    TOKEN_NULL,
-    TOKEN_KEYWORD,
-    TOKEN_IDENTIFIER,
-    TOKEN_SEPERATOR,
-    TOKEN_LITERAL, // The first byte of "value" represents type information
-} TokenType;
-
-typedef enum LiteralType
-{
-    LITERAL_STRING,
-} LiteralType;
-
-#define LITERAL_OFFSET(T) (sizeof(LiteralType) / sizeof(T))
+/* Lexemes are raw strings which match a Token's pattern that have yet to be
+ * evaluated. Created from input using `scan()`. `LexemeList` is a list of
+ * Lexemes that also keeps track of the length, to allow easy passing to
+ * functions and iteration. 
+ */
+typedef const char * Lexeme;
 
 typedef struct LexemeList
 {
     Lexeme *list;
     size_t size;
 } LexemeList;
+
+/* Keeps track of the language's Keywords as an enum `Keyword` and a list of
+ * strings `KEYWORDS` as well as their length in `KEYWORD_COUNT`. Both enum
+ * and list *must* be in the same order, preferably alphabetical.
+ * Keywords are a type of Token.
+ */
+typedef enum Keyword
+{
+    KEYWORD_E,
+    KEYWORD_O,
+    KEYWORD_SITELEN,
+    KEYWORD_TOKI,
+} Keyword;
+
+const char *KEYWORDS[] = {
+    "e",
+    "o",
+    "sitelen",
+    "toki",
+};
+
+const int KEYWORD_COUNT = sizeof(KEYWORDS) / sizeof(const char *);
+
+/* Keeps track of the language's Separators (which are mostly punctuation
+ * marks used) as an enum `Separator` and a list of strings `SEPARATORS`
+ * as well as their length in `SEPARATOR_COUNT`. Both enum and list *must*
+ * be in the same order, preferably alphabetical.
+ * Separators are a type of Token.
+ */
+typedef enum Separator
+{
+    SEPARATOR_PERIOD,
+} Separator;
+
+const char *SEPARATORS[] = {
+    ".",
+};
+
+const int SEPARATOR_COUNT = sizeof(SEPARATORS) / sizeof(const char *);
+
+/* Keeps track of the different types of Literals in toki as an enum
+ * `Literal` and a list of strings `LITERALS` (which is just a human
+ * readable name for the type) as well as their length in `LITERAL_COUNT`.
+ * Both enum and list *must* be in the same order, preferably alphabetical.
+ * Literals are a type of Token.
+ */
+typedef enum Literal
+{
+    LITERAL_STRING,
+} Literal;
+
+const char *LITERALS[] = {
+    "String",
+};
+
+const int LITERAL_COUNT = sizeof(LITERALS) / sizeof(const char *);
+
+/* Tokens are the base unit of the program's grammar. They store a type as
+ * a `TokenType`, a value, and a size of that value in bytes. They are
+ * created by Lexemes using `evaluate`. `TokenList` is a list of Tokens that
+ * also keeps track of the length, to allow easy passing to functions and
+ * iteration.
+ * Default/NULL values of `Token` and `TokenList` also exist as
+ * `Token_default` and `TokenList_default`, due to the necessity of
+ * initializing Tokens without a value.
+ */
+typedef enum TokenType
+{
+    TOKEN_NULL,
+    TOKEN_KEYWORD,
+    TOKEN_IDENTIFIER,
+    TOKEN_SEPARATOR,
+    TOKEN_LITERAL,
+} TokenType;
 
 typedef struct Token
 {
@@ -81,11 +118,9 @@ typedef struct Token
     size_t size;
 } Token;
 
-// this is some confusing naming, TODO ig
-const Token NULL_TOKEN = (Token){
-    .type = TOKEN_NULL,
-    .size = 0,
-    .value = NULL};
+const Token Token_default = (Token) {
+    .type = TOKEN_NULL, .size = 0, .value = NULL
+};
 
 typedef struct TokenList
 {
@@ -93,10 +128,73 @@ typedef struct TokenList
     size_t size;
 } TokenList;
 
-const TokenList NULL_TOKENLIST = (TokenList){
+const TokenList TokenList_default = (TokenList) {
     .list = NULL,
-    .size = 0};
+    .size = 0
+};
 
+/* The following structs define a DCG for constructing toki's expressions,
+ * which due to the emulation of a natural language look more like sentences.
+ * The structs only hold information intrinsic to the type of phrase, and do
+ * not describe word-order (that's dealt with in `parse()`)
+ * I know this is no Chompsky bare phrase structure or anything, but that
+ * level of abstraction is worthless for this application. Basic phrase
+ * structure rules it is!
+ * 
+ * NP holds N (AdjP+)
+ * VP holds V (AdvP+) (NP)
+ * S  holds (NP) (VP)  (N.B a lone NP or doesn't do anything! could be useful
+ *                      for a REPL in the future though...)
+ */
+typedef struct NounPhrase
+{
+    Token noun;
+    TokenList adjp;
+} NounPhrase;
+
+typedef struct VerbPhrase
+{
+    Token verb;
+    TokenList advp;
+    NounPhrase object;
+} VerbPhrase;
+
+typedef struct Sentence
+{
+    NounPhrase subject;
+    VerbPhrase predicate;
+    // tense? aspect? mood? li vs o distinction might go here later
+} Sentence;
+
+typedef struct SentenceList
+{
+    Sentence *list;
+    size_t size;
+} SentenceList;
+
+/* These structs hold the data that will be included in the write to ASM.
+ * `SectionData` holds information in `section .data`, and
+ * `SectionText` holds information in `section .text`.
+ */
+typedef struct SectionData
+{
+    const char **lines;
+    size_t size;
+    int literals;
+} SectionData;
+
+typedef struct SectionText
+{
+    const char **lines;
+    size_t size;
+} SectionText;
+
+// LEXICAL ANALYSIS
+
+/* Begins the process of Lexical Analysis by generating a list of Lexemes
+ * from the input string.
+ * (https://en.wikipedia.org/wiki/Lexical_analysis)
+ */
 LexemeList scan(const char *input)
 {
     typedef enum Mode
@@ -116,13 +214,13 @@ LexemeList scan(const char *input)
     int col = 0;
 
     // parse tokens
-    while (*(p - 1) != '\0')
-    { // use p - 1 in case file ends early
+    while (*(p - 1) != '\0')  // use p - 1 in case file ends early
+    {
         if (mode == UNKNOWN)
         {
             if (isspace(*p) || iscntrl(*p))
             {
-                // do nothing!
+                ; // do nothing!
             }
             else if (isalpha(*p))
             {
@@ -204,6 +302,10 @@ LexemeList scan(const char *input)
     return (LexemeList){.list = lexemes, .size = lexemes_size};
 }
 
+/* Completes the process of Lexical Analysis by evaluating a list of Lexemes
+ * and creating a list of Tokens.
+ * (https://en.wikipedia.org/wiki/Lexical_analysis)
+ */
 TokenList evaluate(LexemeList input)
 {
     Lexeme *lexemes = input.list;
@@ -221,7 +323,7 @@ TokenList evaluate(LexemeList input)
 
         for (int kw = 0; kw < KEYWORD_COUNT; ++kw)
         {
-            if (!strcmp(lexemes[lex], keywords[kw]))
+            if (!strcmp(lexemes[lex], KEYWORDS[kw]))
             {
                 type = TOKEN_KEYWORD;
                 size = sizeof(Keyword);
@@ -252,10 +354,10 @@ TokenList evaluate(LexemeList input)
             }
             int str_size = p - q; // no +1 to get rid of end quote
             // +1 to make room for type byte
-            size = sizeof(LiteralType) + (str_size) * sizeof(char);
+            size = sizeof(Literal) + (str_size) * sizeof(char);
             value = malloc(size);
-            strncpy((char*) value + LITERAL_OFFSET(char), q, str_size);
-            ((LiteralType *)value)[0] = LITERAL_STRING;
+            strncpy((char *) ((Literal *) value + 1), q, str_size);
+            ((Literal *) value)[0] = LITERAL_STRING;
             ((char *)value)[size] = '\0';
             tokens[tokens_size] = (Token){
                 .type = type,
@@ -265,16 +367,16 @@ TokenList evaluate(LexemeList input)
             continue;
         }
 
-        // seperators
+        // separators
 
-        for (int sp = 0; sp < SEPERATOR_COUNT; ++sp)
+        for (int sp = 0; sp < SEPARATOR_COUNT; ++sp)
         {
-            if (!strcmp(lexemes[lex], seperators[sp]))
+            if (!strcmp(lexemes[lex], SEPARATORS[sp]))
             {
-                type = TOKEN_SEPERATOR;
-                size = sizeof(Seperator);
+                type = TOKEN_SEPARATOR;
+                size = sizeof(Separator);
                 value = malloc(size);
-                *(Seperator *)value = (Seperator)sp;
+                *(Separator *)value = (Separator)sp;
                 break;
             }
         }
@@ -292,48 +394,19 @@ TokenList evaluate(LexemeList input)
     return (TokenList){.list = tokens, .size = tokens_size};
 }
 
-///////////
-// PARSE //
-///////////
+// PARSING
 
-// First probably needs to be transpiled into some intermediate language
-// that is more easily formed into ASM?
-
-// I know this is no Chompsky bare phrase structure or anything, but that
-// level of abstraction is worthless for this application. Basic phrase
-// structure rules it is!
-
-typedef struct NounPhrase
-{
-    Token noun;
-    TokenList adjp;
-} NounPhrase;
-
-typedef struct VerbPhrase
-{
-    Token verb;
-    TokenList advp;
-    NounPhrase object;
-} VerbPhrase;
-
-// this is where any "la" phrases, clauses, subphrases etc. will eventually
-// be contained (if we have any)
-typedef struct Sentence
-{
-    NounPhrase subject;
-    VerbPhrase predicate;
-    // tense? aspect? mood? li vs o distinction might go here later
-} Sentence;
-
-typedef struct SentenceList
-{
-    Sentence *list;
-    size_t size;
-} SentenceList;
-
-// still need to figure out how to do boolean "ands", since "en" will be used
-// to conjoin subjects for APL like array processing shit
-
+/* Uses DCG to convert a `TokenList` into the information necessary to create
+ * ASM. Puts information into the phrases defined under `Sentence`.
+ * This process is significantly simplified by toki pona's use of particles
+ * to denote the subject, object, and verb.
+ * 
+ * NOTE: Currently this language does not permit "nasin kijete" (free word
+ * order). This feature may be available as a flag in the future.
+ * 
+ * PSR for toki (in their current state)
+ * S --> (Literal) o sitelen e Literal
+ */
 SentenceList parse(TokenList input)
 {
     // currently not accounting for "la"
@@ -369,13 +442,13 @@ SentenceList parse(TokenList input)
             {
                 if (block.size == 0)
                 {
-                    s.subject.noun = NULL_TOKEN;
-                    s.subject.adjp = NULL_TOKENLIST;
+                    s.subject.noun = Token_default;
+                    s.subject.adjp = TokenList_default;
                 }
                 else if (block.size == 1)
                 {
                     s.subject.noun = block.list[0];
-                    s.subject.adjp = NULL_TOKENLIST;
+                    s.subject.adjp = TokenList_default;
                 }
                 else
                 {
@@ -387,7 +460,9 @@ SentenceList parse(TokenList input)
             }
             else if (mode == PHRASE_E)
             {
-                // TODO: implement
+                ;
+                // TODO: multiple predicates
+                // e.g. jan [VP li moku e kili] [VP li wile e kasi]
             }
             mode = PHRASE_O;
             block.list = malloc(10 * sizeof(Token));
@@ -398,35 +473,21 @@ SentenceList parse(TokenList input)
         {
             if (mode == PHRASE_EN)
             {
-                if (block.size == 0)
-                {
-                    s.subject.noun = NULL_TOKEN;
-                    s.subject.adjp = NULL_TOKENLIST;
-                }
-                else if (block.size == 1)
-                {
-                    s.subject.noun = block.list[0];
-                    s.subject.adjp = NULL_TOKENLIST;
-                }
-                else
-                {
-                    s.subject.noun = block.list[0];
-                    s.subject.adjp = (TokenList){
-                        .list = block.list + 1,
-                        .size = block.size - 1};
-                }
+                ;
+                // ERROR: skipping verb, ungrammatical!
+                // wait till nasin kijete flag is implemented!
             }
             else if (mode == PHRASE_O)
             {
                 if (block.size == 0)
                 {
-                    s.predicate.verb = NULL_TOKEN;
-                    s.predicate.advp = NULL_TOKENLIST;
+                    s.predicate.verb = Token_default;
+                    s.predicate.advp = TokenList_default;
                 }
                 else if (block.size == 1)
                 {
                     s.predicate.verb = block.list[0];
-                    s.predicate.advp = NULL_TOKENLIST;
+                    s.predicate.advp = TokenList_default;
                 }
                 else
                 {
@@ -440,21 +501,21 @@ SentenceList parse(TokenList input)
             block.list = malloc(10 * sizeof(Token));
             block.size = 0;
         }
-        else if (p->type == TOKEN_SEPERATOR &&
-                 *(Seperator *)p->value == SEPERATOR_PERIOD)
+        else if (p->type == TOKEN_SEPARATOR &&
+                 *(Separator *)p->value == SEPARATOR_PERIOD)
         {
 
             if (mode == PHRASE_E)
             {
                 if (block.size == 0)
                 {
-                    s.predicate.object.noun = NULL_TOKEN;
-                    s.predicate.object.adjp = NULL_TOKENLIST;
+                    s.predicate.object.noun = Token_default;
+                    s.predicate.object.adjp = TokenList_default;
                 }
                 else if (block.size == 1)
                 {
                     s.predicate.object.noun = block.list[0];
-                    s.predicate.object.adjp = NULL_TOKENLIST;
+                    s.predicate.object.adjp = TokenList_default;
                 }
                 else
                 {
@@ -481,7 +542,8 @@ SentenceList parse(TokenList input)
         ++p;
     }
 
-    if (block.list != NULL) {
+    if (block.list != NULL)
+    {
         free(block.list);
     }
 
@@ -490,29 +552,12 @@ SentenceList parse(TokenList input)
         .size = size};
 }
 
-/////////////
-// Compile //
-/////////////
 
-typedef struct SectionData
-{
-    // TODO: currently we can just keep strings, but in the future it might be
-    // better to keep more abstract data to be dealt with in write(). might
-    // allow type inference? if that's a feature we want?
-    const char **lines;
-    size_t size;
-    int literals;
-} SectionData;
+// COMPILING
 
-typedef struct SectionText
-{
-    // TODO: this should also be more abstract, maybe make it subdivided into
-    // each seperate label? could be easier to organize readable ASM and
-    // include library functions and default parameters in the future.
-    const char **lines;
-    size_t size;
-} SectionText;
-
+/* Inputs data retrieved from `Sentence` into provided `SectionData` and
+ * `SectionText` pointers by generating ASM.
+ */
 void compile_sentence(Sentence s, SectionData *data, SectionText *text)
 {
     if (s.subject.noun.type == TOKEN_NULL)
@@ -531,14 +576,14 @@ void compile_sentence(Sentence s, SectionData *data, SectionText *text)
                  (*(Keyword *)s.predicate.verb.value == KEYWORD_SITELEN))
         {
             if (s.predicate.object.noun.type == TOKEN_LITERAL &&
-                (*(LiteralType *)s.predicate.object.noun.value == LITERAL_STRING))
+                (*(Literal *)s.predicate.object.noun.value == LITERAL_STRING))
             {
                 // Generate data
                 char *dataline = malloc(81 * sizeof(char));
                 sprintf(dataline,
                         "LITERAL_%d db \"%s\", 0",
                         data->literals,
-                        ((char *)s.predicate.object.noun.value) + LITERAL_OFFSET(char));
+                        (char *) ((Literal *) s.predicate.object.noun.value + 1) );
                 data->lines[data->size] = dataline;
                 ++data->size;
 
@@ -573,6 +618,8 @@ void compile_sentence(Sentence s, SectionData *data, SectionText *text)
     }
 }
 
+/* Writes data from `SectionData` and `SectionText` into an assembly file.
+ */
 void write(const char *outfile, const SectionData *sd, const SectionText *st)
 {
     char *fname = malloc(80 * sizeof(char));
@@ -611,6 +658,8 @@ void write(const char *outfile, const SectionData *sd, const SectionText *st)
     fclose(fptr);
 }
 
+/* Makes the assembly file into an `.exe`.
+ */
 void make(const char *outfile)
 {
     char *cmd1 = malloc(80 * sizeof(const char));
@@ -634,6 +683,8 @@ void make(const char *outfile)
 #endif
 }
 
+/* Compiles every sentence, writes to an ASM file, and then makes the file.
+ */
 void compile(const char *outfile, SentenceList input)
 {
     SectionData *sd = malloc(sizeof(SectionData));
@@ -647,16 +698,15 @@ void compile(const char *outfile, SentenceList input)
     // Convert SentenceList to SectionData and SectionText
     for (int i = 0; i < input.size; ++i)
     {
-        compile_sentence(input.list[i], &sd, &st);
+        compile_sentence(input.list[i], sd, st);
     }
 
     write(outfile, sd, st);
     make(outfile);
 }
 
-/////////////
-// Display //
-/////////////
+// DISPLAY
+// (for printing debug information, probably only temporary)
 
 void printToken(Token t)
 {
@@ -665,7 +715,7 @@ void printToken(Token t)
     case TOKEN_KEYWORD:
         printf("Type: %d, Value: %s\n",
                t.type,
-               keywords[*(Keyword *)t.value]);
+               KEYWORDS[*(Keyword *)t.value]);
         break;
     case TOKEN_LITERAL:
         switch (*(char *)t.value)
@@ -673,43 +723,85 @@ void printToken(Token t)
         case LITERAL_STRING:
             printf("Type: %d, Value: \"%s\" : String\n",
                    t.type,
-                   ((char *)t.value) + LITERAL_OFFSET(char));
+                   (char *) ((Literal *) t.value + 1));
             break;
         }
         break;
-    case TOKEN_SEPERATOR:
+    case TOKEN_SEPARATOR:
         printf("Type: %d, Value: %s\n",
                t.type,
-               seperators[*(Seperator *)t.value]);
+               SEPARATORS[*(Separator *)t.value]);
         break;
     }
 }
 
-//////////
-// MAIN //
-//////////
+/*
+for (int i = 0; i < sentences.size; ++i) {
+    printf("[S\n");
+        printf("\t[N\n\t\t");
+            printToken(sentences.list[i].subject.noun);
+        printf("\t]\n");
+        printf("\t[VP\n");
+            printf("\t\t[V\n\t\t\t");
+                printToken(sentences.list[i].predicate.verb);
+            printf("\t\t]\n");
+            printf("\t\t[N\n\t\t\t");
+                printToken(sentences.list[i].predicate.object.noun);
+            printf("\t\t]\n");
+        printf("\t]\n");
+    printf("]\n");
+}*/
+
+/*
+// print token list
+for (int i = 0; i < tokens.size; ++i) {
+    switch (tokens.list[i].type) {
+        case TOKEN_KEYWORD:
+            printf("Type: %d, Value: %s\n",
+                tokens.list[i].type,
+                keywords[* (Keyword*) tokens.list[i].value]);
+            break;
+        case TOKEN_LITERAL:
+            switch (* (char*) tokens.list[i].value) {
+                case LITERAL_STRING:
+                    printf("Type: %d, Value: \"%s\" : String\n",
+                        tokens.list[i].type,
+                        ((char*) tokens.list[i].value)
+                        + LITERAL_OFFSET(char)
+                        );
+                    break;
+            }
+            break;
+        case TOKEN_SEPARATOR:
+            printf("Type: %d, Value: %s\n",
+                tokens.list[i].type,
+                separators[* (Separator*) tokens.list[i].value]);
+            break;
+    }
+}
+*/
+
+// MAIN
 
 int main(int argc, char *argv[])
 {
-
-#if DEBUG_MODE
-    const char *outfname = "hello";
-    const char *fname = "hello.toki";
-#else
+#if REQUIRE_COMMAND_LINE_ARGS
     // check number of arguments
     if (argc != 3)
     {
         fprintf(
             stderr,
-            "Incorrect number of arguments (expected 1 got %d).\n",
+            "Incorrect number of arguments (expected 2, got %d).\n",
             argc - 1);
 
         exit(1);
     }
-
     // asm file
     const char *fname = argv[1];
     const char *outfname = argv[2];
+#else
+    const char *outfname = DEFAULT_OUTPUT_FILENAME;
+    const char *fname = DEFAULT_OUTPUT_FILENAME;
 #endif
 
     // open file
@@ -735,52 +827,6 @@ int main(int argc, char *argv[])
     TokenList tokens = evaluate(lexemes);
     SentenceList sentences = parse(tokens);
     compile(outfname, sentences);
-
-    /*
-    for (int i = 0; i < sentences.size; ++i) {
-        printf("[S\n");
-            printf("\t[N\n\t\t");
-                printToken(sentences.list[i].subject.noun);
-            printf("\t]\n");
-            printf("\t[VP\n");
-                printf("\t\t[V\n\t\t\t");
-                    printToken(sentences.list[i].predicate.verb);
-                printf("\t\t]\n");
-                printf("\t\t[N\n\t\t\t");
-                    printToken(sentences.list[i].predicate.object.noun);
-                printf("\t\t]\n");
-            printf("\t]\n");
-        printf("]\n");
-    }*/
-
-    /*
-    // print token list
-    for (int i = 0; i < tokens.size; ++i) {
-        switch (tokens.list[i].type) {
-            case TOKEN_KEYWORD:
-                printf("Type: %d, Value: %s\n",
-                    tokens.list[i].type,
-                    keywords[* (Keyword*) tokens.list[i].value]);
-                break;
-            case TOKEN_LITERAL:
-                switch (* (char*) tokens.list[i].value) {
-                    case LITERAL_STRING:
-                        printf("Type: %d, Value: \"%s\" : String\n",
-                            tokens.list[i].type,
-                            ((char*) tokens.list[i].value)
-                            + LITERAL_OFFSET(char)
-                            );
-                        break;
-                }
-                break;
-            case TOKEN_SEPERATOR:
-                printf("Type: %d, Value: %s\n",
-                    tokens.list[i].type,
-                    seperators[* (Seperator*) tokens.list[i].value]);
-                break;
-        }
-    }
-    */
 
     fclose(fptr);
 
