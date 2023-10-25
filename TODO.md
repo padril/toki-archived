@@ -2,7 +2,14 @@
 
 ## Next Refactor/Cleanup Milestone
 
-- [ ] Functioning FizzBuzz.toki
+- [ ] Functioning variables.toki
+    - [ ] Variables
+    - [ ] Numbers
+    - [ ] Operators
+        - [ ] Plus operator
+            - [ ] On numbers and strings
+    - [ ] Keyword `toki` (for converting to )
+- [ ] Functioning fizzbuzz.toki
     - [ ] Numbers
     - [ ] Modulus operator
     - [ ] Loops
@@ -32,7 +39,9 @@ contained in `Sentence` (or `ComplementPhrase`?)
 - [ ] Do we want empty Sentences (`.`, `o sitelen e "Hello. .`, etc.) to be
 syntactically valid? Should S hold (NP) (VP) or hold {(NP) VP, NP}? Could be
 cute syntactic sugar for `...` or something?
-- [ ] TAM / *li* vs *o* distinction might go in `Sentence` later. 
+- [ ] TAM / *li* vs *o* distinction might go in `Sentence` later.
+- [ ] Some sort of preprocessor will be useful for comments, before the
+scan step.
 
 ### Style / Improvements
 
@@ -52,8 +61,8 @@ functions, and maybe creating a log file.
 
 ## Long term goals
 
-- [ ] Some sort of preprocessor might be useful in the far future, before the
-scan step.
+- [ ] Start documentation
+- [ ] README.md
 - [ ] Add "nasin kijete" (free word order) flag.
 - [ ] Currently `SectionData` and `SectionText` can just keep lines as strings,
 but in the future it might be better to keep more abstract data to be dealt with
