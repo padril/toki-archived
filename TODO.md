@@ -45,8 +45,12 @@ scan step.
 
 ### Style / Improvements
 
+- [ ] Compiling is overly verbose, the inputing of ASM should be shortened into
+a function.
 - [ ] Create some type of simple static analysis to ensure enum/string list
 pairs are correctly ordered.
+- [ ] Parsing is overly complicated giving absence of nasin kijete, it should be
+shortened down. **PRIORITIZE THIS, ITS REALLY BAD**
 - [ ] Literal Tokens kind of suck right now, the first part of "value"
 represents type information, and then the rest represents the actual value. I
 feel like this could either be simpler, use less memory, or something else if

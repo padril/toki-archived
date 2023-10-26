@@ -14,8 +14,8 @@
  */
 #define REQUIRE_COMMAND_LINE_ARGS 1
 #if !(REQUIRE_COMMAND_LINE_ARGS)
-    #define DEFAULT_INPUT_FILENAME "hello.c"
-    #define DEFAULT_OUTPUT_FILENAME "hello"
+    #define DEFAULT_INPUT_FILENAME "./examples/hello_var.toki"
+    #define DEFAULT_OUTPUT_FILENAME "hello_var"
 #endif
 
 /* When set to 1, will delete generated .asm and .obj files. Turn off if
@@ -49,6 +49,8 @@ typedef enum Keyword
     KEYWORD_O,
     KEYWORD_SITELEN,
     KEYWORD_TOKI,
+    KEYWORD_LI,
+    KEYWORD_SAMA,
 } Keyword;
 
 const char *KEYWORDS[] = {
@@ -56,6 +58,8 @@ const char *KEYWORDS[] = {
     "o",
     "sitelen",
     "toki",
+    "li",
+    "sama"
 };
 
 const int KEYWORD_COUNT = sizeof(KEYWORDS) / sizeof(const char *);
@@ -119,9 +123,9 @@ typedef struct Token
     size_t size;
 } Token;
 
-const Token Token_default = (Token) {
-    .type = TOKEN_NULL, .size = 0, .value = NULL
-};
+#define TOKEN_DEFAULT ((Token) {\
+    .type = TOKEN_NULL, .size = 0, .value = NULL\
+})
 
 typedef struct TokenList
 {
@@ -129,10 +133,10 @@ typedef struct TokenList
     size_t size;
 } TokenList;
 
-const TokenList TokenList_default = (TokenList) {
-    .list = NULL,
-    .size = 0
-};
+#define TOKENLIST_DEFAULT ((TokenList) {\
+    .list = NULL,\
+    .size = 0\
+})
 
 /* The following structs define a DCG for constructing toki's expressions,
  * which due to the emulation of a natural language look more like sentences.
@@ -155,6 +159,11 @@ typedef struct NounPhrase
     TokenList adjp;   // adjective phrase
 } NounPhrase;
 
+#define NOUNPHRASE_DEFAULT ((NounPhrase) {\
+    .noun = TOKEN_DEFAULT,\
+    .adjp = TOKENLIST_DEFAULT\
+})
+
 typedef struct VerbPhrase
 {
     Token verb;       // verb
@@ -162,11 +171,22 @@ typedef struct VerbPhrase
     NounPhrase obj;   // object
 } VerbPhrase;
 
+#define VERBPHRASE_DEFAULT ((VerbPhrase) {\
+    .verb = TOKEN_DEFAULT,\
+    .advp = TOKENLIST_DEFAULT,\
+    .obj = NOUNPHRASE_DEFAULT\
+})
+
 typedef struct Sentence
 {
     NounPhrase subj;  // subject
     VerbPhrase pred;  // predicate
 } Sentence;
+
+#define SENTENCE_DEFAULT ((Sentence) {\
+    .subj = NOUNPHRASE_DEFAULT,\
+    .pred = VERBPHRASE_DEFAULT\
+})
 
 typedef struct SentenceList
 {
@@ -241,7 +261,7 @@ LexemeList scan(const char *input)
         {
             if (isspace(*p) || iscntrl(*p))
             {
-                ; // do nothing, whitespace
+                ++q; // do nothing, whitespace
             }
             else if (isalpha(*p))
             {
@@ -267,7 +287,7 @@ LexemeList scan(const char *input)
         }
         else if (mode == TEXT)
         {
-            if (isspace(*p) || iscntrl(*p))
+            if (isspace(*p) || iscntrl(*p) || (*p == '.'))
             {
                 // construct string
                 int str_size = p - q;
@@ -281,7 +301,11 @@ LexemeList scan(const char *input)
                 // add token
                 lexemes[lexemes_size] = lex;
                 ++lexemes_size;
-
+                if (*p == '.')
+                {
+                    lexemes[lexemes_size] = ".";
+                    ++lexemes_size;
+                }
                 // clean
                 mode = UNKNOWN;
                 q = p + 1; // p will be incremented by one later
@@ -336,9 +360,9 @@ TokenList evaluate(LexemeList input)
 
     for (int lex = 0; lex < input.size; ++lex)
     {
-        Token curr = Token_default;
+        Token curr = TOKEN_DEFAULT;
 
-        // keyword and identifier
+        // keyword
         // TODO: replace with binsearch, or hash
 
         for (int kw = 0; kw < KEYWORD_COUNT; ++kw)
@@ -354,6 +378,38 @@ TokenList evaluate(LexemeList input)
         }
         if (curr.type != TOKEN_NULL)
         {
+            tokens[tokens_size] = curr;
+            ++tokens_size;
+            continue;
+        }
+
+        // identifier
+
+        bool ident = true;
+        if (isalpha(*lexemes[lex]))  // is first character alpha?
+        {
+            const char *p = lexemes[lex];
+            while (*p != '\0')
+            {
+                if (!isalnum(*p) && (*p != '_'))
+                {
+                    ident = false;
+                    break;
+                }
+                ++p;
+            }
+        }
+        else
+        {
+            ident = false;
+        }
+        if (ident)
+        {
+            curr.type = TOKEN_IDENTIFIER;
+            curr.size = sizeof(char) * strlen(lexemes[lex]);
+            curr.value = malloc(curr.size);
+            strncpy((char *) curr.value, lexemes[lex], curr.size);
+            ((char *) curr.value)[curr.size] = '\0';
             tokens[tokens_size] = curr;
             ++tokens_size;
             continue;
@@ -430,9 +486,9 @@ SentenceList parse(TokenList input)
 
     Mode mode = PHRASE_EN;
 
-    Sentence s;
+    Sentence s = SENTENCE_DEFAULT;
     TokenList block;
-    block.list = NULL;
+    block.list = malloc(10 * sizeof(Token));
     block.size = 0;
 
     Sentence *sl = malloc(50 * sizeof(Sentence));
@@ -446,19 +502,19 @@ SentenceList parse(TokenList input)
     // >>> e "Hello, " o sitelen e "world!".
     for (int i = 0; i < input.size; ++i)
     {
-        if (is_keyword(*p, KEYWORD_O))
+        if (is_keyword(*p, KEYWORD_O) || is_keyword(*p, KEYWORD_LI))
         {
             if (mode == PHRASE_EN)
             {
                 if (block.size == 0)
                 {
-                    s.subj.noun = Token_default;
-                    s.subj.adjp = TokenList_default;
+                    s.subj.noun = TOKEN_DEFAULT;
+                    s.subj.adjp = TOKENLIST_DEFAULT;
                 }
                 else if (block.size == 1)
                 {
                     s.subj.noun = block.list[0];
-                    s.subj.adjp = TokenList_default;
+                    s.subj.adjp = TOKENLIST_DEFAULT;
                 }
                 else
                 {
@@ -490,13 +546,13 @@ SentenceList parse(TokenList input)
             {
                 if (block.size == 0)
                 {
-                    s.pred.verb = Token_default;
-                    s.pred.advp = TokenList_default;
+                    s.pred.verb = TOKEN_DEFAULT;
+                    s.pred.advp = TOKENLIST_DEFAULT;
                 }
                 else if (block.size == 1)
                 {
                     s.pred.verb = block.list[0];
-                    s.pred.advp = TokenList_default;
+                    s.pred.advp = TOKENLIST_DEFAULT;
                 }
                 else
                 {
@@ -512,18 +568,37 @@ SentenceList parse(TokenList input)
         }
         else if (is_seperator(*p, SEPARATOR_PERIOD))
         {
-
-            if (mode == PHRASE_E)
+            if (mode == PHRASE_O)
             {
                 if (block.size == 0)
                 {
-                    s.pred.obj.noun = Token_default;
-                    s.pred.obj.adjp = TokenList_default;
+                    s.pred.verb = TOKEN_DEFAULT;
+                    s.pred.advp = TOKENLIST_DEFAULT;
+                }
+                else if (block.size == 1)
+                {
+                    s.pred.verb = block.list[0];
+                    s.pred.advp = TOKENLIST_DEFAULT;
+                }
+                else
+                {
+                    s.pred.verb = block.list[0];
+                    s.pred.advp = (TokenList) {
+                        .list = block.list + 1,
+                        .size = block.size - 1};
+                }
+            }
+            else if (mode == PHRASE_E)
+            {
+                if (block.size == 0)
+                {
+                    s.pred.obj.noun = TOKEN_DEFAULT;
+                    s.pred.obj.adjp = TOKENLIST_DEFAULT;
                 }
                 else if (block.size == 1)
                 {
                     s.pred.obj.noun = block.list[0];
-                    s.pred.obj.adjp = TokenList_default;
+                    s.pred.obj.adjp = TOKENLIST_DEFAULT;
                 }
                 else
                 {
@@ -534,15 +609,15 @@ SentenceList parse(TokenList input)
                 }
             }
 
-            mode == PHRASE_EN;
+            mode = PHRASE_EN;  // set PHRASE_EN here for next sentence
             block.list = malloc(10 * sizeof(Token));
             block.size = 0;
 
-            // definitely need to reset s at some point here
             sl[size] = s;
+            s = SENTENCE_DEFAULT;
             ++size;
         }
-        else
+        else  // identifiers, literals
         {
             block.list[block.size] = *p;
             ++block.size;
@@ -582,7 +657,27 @@ void compile_sentence(Sentence s, SectionData *data, SectionText *text)
         }
         else if (is_keyword((s.pred.verb), KEYWORD_SITELEN))
         {
-            if (is_literal(s.pred.obj.noun, LITERAL_STRING))
+            if (s.pred.obj.noun.type == TOKEN_IDENTIFIER)
+            {
+                // Generate
+                char *textline1 = malloc(81 * sizeof(char));
+                char *textline2 = malloc(81 * sizeof(char));
+                char *textline3 = malloc(81 * sizeof(char));
+                sprintf(textline1,
+                        "push    VARIABLE_%s",
+                        (char *) s.pred.obj.noun.value);
+                sprintf(textline2,
+                        "call    _printf");
+                sprintf(textline3,
+                        "add     esp, 4");
+                text->lines[text->size] = textline1;
+                ++text->size;
+                text->lines[text->size] = textline2;
+                ++text->size;
+                text->lines[text->size] = textline3;
+                ++text->size;
+            }
+            else if (is_literal(s.pred.obj.noun, LITERAL_STRING))
             {
                 // Generate data
                 char *dataline = malloc(81 * sizeof(char));
@@ -621,6 +716,43 @@ void compile_sentence(Sentence s, SectionData *data, SectionText *text)
                     "Incorrect object for verb 'sitelen'.\n");
                 exit(1);
             }
+        }
+    }
+    else  // extant subject
+    {
+        if (s.pred.verb.type == TOKEN_NULL)
+        {
+            return;  // Do nothing, we have an lone NP
+        }
+        else if (is_keyword(s.pred.verb, KEYWORD_SAMA))
+        {
+            if (s.subj.noun.type != TOKEN_IDENTIFIER)
+            {
+                fprintf(
+                    stderr,
+                    "Subject must be identifier in assignment.\n");
+                exit(1);
+            }
+            if (s.pred.obj.noun.type == TOKEN_NULL)
+            {
+                fprintf(
+                    stderr,
+                    "Assignment statement needs object.\n");
+                exit(1);
+            }
+
+            // Generate data
+            char *dataline = malloc(81 * sizeof(char));
+            if (is_literal(s.pred.obj.noun, LITERAL_STRING))
+            {
+                sprintf(dataline,
+                    "VARIABLE_%s db \"%s\", 0",
+                    (char *) s.subj.noun.value,
+                    (char *) ((Literal *) s.pred.obj.noun.value + 1)
+                );
+            }
+            data->lines[data->size] = dataline;
+            ++data->size;
         }
     }
 }
@@ -808,11 +940,11 @@ int main(int argc, char *argv[])
     const char *outfname = argv[2];
 #else
     const char *outfname = DEFAULT_OUTPUT_FILENAME;
-    const char *fname = DEFAULT_OUTPUT_FILENAME;
+    const char *fname = DEFAULT_INPUT_FILENAME;
 #endif
 
     // open file
-    FILE *fptr = fopen(fname, "r");
+    FILE *fptr = fopen(fname, "rb");
 
     // check file existed
     if (fptr == NULL)
@@ -826,11 +958,26 @@ int main(int argc, char *argv[])
     }
 
     // read file
-    char str[101];
-    fgets(str, 100, fptr);
-    str[100] = '\0';
+    // from Nils Pipenbrinck on stack overflow
+    fseek(fptr, 0, SEEK_END);
+    long length = ftell(fptr);
+    fseek(fptr, 0, SEEK_SET);
+    char *buffer = malloc((length + 1) * sizeof(char));
+    if (buffer)
+    {
+        fread(buffer, 1, length, fptr);
+        buffer[length] = '\0';
+    }
 
-    LexemeList lexemes = scan(str);
+    if (buffer == NULL)
+    {
+        fprintf(
+            stderr,
+            "Something went wrong reading file!"
+        );
+    }
+
+    LexemeList lexemes = scan(buffer);
     TokenList tokens = evaluate(lexemes);
     SentenceList sentences = parse(tokens);
     compile(outfname, sentences);
