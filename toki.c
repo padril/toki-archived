@@ -50,7 +50,9 @@ typedef enum Keyword
     KEYWORD_SITELEN,
     KEYWORD_TOKI,
     KEYWORD_LI,
+    KEYWORD_KAMA,
     KEYWORD_SAMA,
+    KEYWORD_SIN,
 } Keyword;
 
 const char *KEYWORDS[] = {
@@ -59,7 +61,9 @@ const char *KEYWORDS[] = {
     "sitelen",
     "toki",
     "li",
-    "sama"
+    "kama",
+    "sama",
+    "sin"
 };
 
 const int KEYWORD_COUNT = sizeof(KEYWORDS) / sizeof(const char *);
@@ -110,10 +114,11 @@ const int LITERAL_COUNT = sizeof(LITERALS) / sizeof(const char *);
 typedef enum TokenType
 {
     TOKEN_NULL,
-    TOKEN_KEYWORD,
     TOKEN_IDENTIFIER,
+    TOKEN_KEYWORD,
     TOKEN_SEPARATOR,
     TOKEN_LITERAL,
+    TOKEN_OPERATOR,  // Considered conjunctions semantically
 } TokenType;
 
 typedef struct Token
@@ -146,22 +151,58 @@ typedef struct TokenList
  * level of abstraction is worthless for this application. Basic phrase
  * structure rules it is!
  * 
- * NP holds N (AdjP+)
+ * NP holds N (AdjP+) (PP+)
+ * PP -> P (NP)  (N.B Operators are normally here, and are evaluated left to
+ *                right, instead of in typical BEDMAS order)
  * VP holds V (AdvP+) (NP)
  * S  holds (NP) (VP)  (N.B a lone NP or doesn't do anything! could be useful
  *                      for a REPL in the future though...)
  * 
  * These use a lot of short forms because in later code it gets verbose.
  */
+
+typedef struct NounPhraseWithoutPrep {
+    Token noun;
+    TokenList adjp;
+} NounPhraseWithoutPrep;
+
+#define NOUNPHRASEWITHOUTPREP_DEFAULT ((NounPhraseWithoutPrep) {\
+    .noun = TOKEN_DEFAULT,\
+    .adjp = TOKENLIST_DEFAULT\
+})
+
+typedef struct PrepPhrase {
+    Token prep;
+    NounPhraseWithoutPrep np;  // this whole PreplessNounPhrase shit prevents
+                            // weird recursive stuff from happening
+} PrepPhrase;
+
+#define PREPPHRASE_DEFAULT ((PrepPhrase) {\
+    .prep = TOKEN_DEFAULT,\
+    .np = NOUNPHRASEWITHOUTPREP_DEFAULT\
+})
+
+typedef struct PrepPhraseList {
+    PrepPhrase *list;
+    size_t size;
+} PrepPhraseList;
+
+#define PREPPHRASELIST_DEFAULT ((PrepPhraseList) {\
+    .list = NULL,\
+    .size = 0\
+})
+
 typedef struct NounPhrase
 {
-    Token noun;       // noun
-    TokenList adjp;   // adjective phrase
+    Token noun;         // noun
+    TokenList adjp;     // adjective phrase
+    PrepPhraseList ppl;  // prepositional phrase +
 } NounPhrase;
 
 #define NOUNPHRASE_DEFAULT ((NounPhrase) {\
     .noun = TOKEN_DEFAULT,\
-    .adjp = TOKENLIST_DEFAULT\
+    .adjp = TOKENLIST_DEFAULT,\
+    .ppl = PREPPHRASELIST_DEFAULT\
 })
 
 typedef struct VerbPhrase
@@ -481,153 +522,199 @@ SentenceList parse(TokenList input)
     {
         PHRASE_EN,
         PHRASE_O,
-        PHRASE_E
+        PHRASE_E,
+        PHRASE_PREP,
     } Mode;
 
     Mode mode = PHRASE_EN;
 
     Sentence s = SENTENCE_DEFAULT;
-    TokenList block;
-    block.list = malloc(10 * sizeof(Token));
-    block.size = 0;
+
+    TokenList buffer;
+    buffer.list = malloc(10 * sizeof(Token));
+    buffer.size = 0;
+
+    Token* head = NULL;
+    TokenList* tail = NULL;
+    PrepPhraseList* ppl = NULL;
 
     Sentence *sl = malloc(50 * sizeof(Sentence));
     size_t size = 0;
 
     Token *p = input.list;
 
-    // We use modes, and switch between them, updating as we go, to go with
-    // the arbitrary way toki pona phrases can be ordered.
-    // still need support for something like
-    // >>> e "Hello, " o sitelen e "world!".
+    // We use modes, and switch between them, updating as we go
+    // The current mode defines the head, tail, and ppl, and when we encounter
+    // anything that indicates we're switching modes, we add stuff in the buffer
+    // to the heads, and then finish switching modes. Rinse, repeat.
     for (int i = 0; i < input.size; ++i)
     {
+        // Set head, tail, ppl
+        if (mode == PHRASE_EN)
+        {
+            head = &(s.subj.noun);
+            tail = &(s.subj.adjp);
+            ppl  = &(s.subj.ppl);
+        }
+        else if (mode == PHRASE_O)
+        {
+            head = &(s.pred.verb);
+            tail = &(s.pred.advp);
+            ppl  = NULL;
+        }
+        else if (mode == PHRASE_E)
+        {
+            head = &(s.pred.obj.noun);
+            tail = &(s.pred.obj.adjp);
+            ppl  = &(s.pred.obj.ppl);
+        }
+        else if (mode == PHRASE_PREP)
+        {
+            head = &(ppl->list[ppl->size].np.noun);
+            tail = &(ppl->list[ppl->size].np.adjp);
+            ppl  = NULL;
+        }
+
+        // Did we encounter something indicated a switch of mode?
         if (is_keyword(*p, KEYWORD_O) || is_keyword(*p, KEYWORD_LI))
         {
-            if (mode == PHRASE_EN)
+            // Handle some invalid cases
+            if (mode == PHRASE_E)
             {
-                if (block.size == 0)
-                {
-                    s.subj.noun = TOKEN_DEFAULT;
-                    s.subj.adjp = TOKENLIST_DEFAULT;
-                }
-                else if (block.size == 1)
-                {
-                    s.subj.noun = block.list[0];
-                    s.subj.adjp = TOKENLIST_DEFAULT;
-                }
-                else
-                {
-                    s.subj.noun = block.list[0];
-                    s.subj.adjp = (TokenList) {
-                        .list = block.list + 1,
-                        .size = block.size - 1};
-                }
-            }
-            else if (mode == PHRASE_E)
-            {
-                ;
-                // TODO: multiple predicates
-                // e.g. jan [VP li moku e kili] [VP li wile e kasi]
-            }
-            mode = PHRASE_O;
-            block.list = malloc(10 * sizeof(Token));
-            block.size = 0;
-        }
-        else if (is_keyword(*p, KEYWORD_E))
-        {
-            if (mode == PHRASE_EN)
-            {
-                ;
-                // ERROR: skipping verb, ungrammatical!
-                // wait till nasin kijete flag is implemented!
+                fprintf(
+                    stderr,
+                    "Unimplemented: cannot use multiple predicates");
+                exit(1);
             }
             else if (mode == PHRASE_O)
             {
-                if (block.size == 0)
-                {
-                    s.pred.verb = TOKEN_DEFAULT;
-                    s.pred.advp = TOKENLIST_DEFAULT;
-                }
-                else if (block.size == 1)
-                {
-                    s.pred.verb = block.list[0];
-                    s.pred.advp = TOKENLIST_DEFAULT;
-                }
-                else
-                {
-                    s.pred.verb = block.list[0];
-                    s.pred.advp = (TokenList) {
-                        .list = block.list + 1,
-                        .size = block.size - 1};
-                }
+                fprintf(
+                    stderr,
+                    "Unimplemented: cannot conjoin predicates");
+                exit(1);
             }
+
+            // Push buffer into sentence
+            if (buffer.size >= 1)
+            {
+                *head = buffer.list[0];
+            }
+            if (buffer.size >= 2)
+            {
+                *tail = (TokenList) {
+                    .list = buffer.list + 1,
+                    .size = buffer.size - 1};
+            }
+
+            // Switch mode, reset buffer
+            mode = PHRASE_O;
+            buffer.list = malloc(10 * sizeof(Token));
+            buffer.size = 0;
+        }
+        else if (is_keyword(*p, KEYWORD_SIN))
+        {
+            // Handle some invalid cases
+            if (mode == PHRASE_O)
+            {
+                fprintf(
+                    stderr,
+                    "Prepositions not allowed after verb phrases.");
+                exit(1);
+            }
+            else if (buffer.size == 0)
+            {
+                fprintf(
+                    stderr,
+                    "Monadic 'sin' is not allowed.");
+                exit(1);
+            }
+
+            // Push buffer into sentence
+            if (buffer.size >= 1)
+            {
+                *head = buffer.list[0];
+            }
+            if (buffer.size >= 2)
+            {
+                s.subj.noun = buffer.list[0];
+                s.subj.adjp = (TokenList) {
+                    .list = buffer.list + 1,
+                    .size = buffer.size - 1};
+            }
+
+            ppl->list[ppl->size].prep = *p;
+
+            // Switch mode, reset buffer
+            mode = PHRASE_PREP;
+            buffer.list = malloc(10 * sizeof(Token));
+            buffer.size = 0;            
+        }
+        else if (is_keyword(*p, KEYWORD_E))
+        {
+            // Handle some invalid cases
+            if (mode == PHRASE_EN)
+            {
+                fprintf(
+                    stderr,
+                    "Error, invalid word order SO");
+                exit(1);
+                // wait till nasin kijete flag is implemented!
+            }
+
+            // Push buffer into sentence
+            if (buffer.size >= 1)
+            {
+                *head = buffer.list[0];
+            }
+            if (buffer.size >= 2)
+            {
+                *tail = (TokenList) {
+                    .list = buffer.list + 1,
+                    .size = buffer.size - 1};
+            }
+
+            // Switch mode, reset buffer
             mode = PHRASE_E;
-            block.list = malloc(10 * sizeof(Token));
-            block.size = 0;
+            buffer.list = malloc(10 * sizeof(Token));
+            buffer.size = 0;
         }
         else if (is_seperator(*p, SEPARATOR_PERIOD))
         {
-            if (mode == PHRASE_O)
+            // Push buffer into sentence
+            if (buffer.size >= 1)
             {
-                if (block.size == 0)
-                {
-                    s.pred.verb = TOKEN_DEFAULT;
-                    s.pred.advp = TOKENLIST_DEFAULT;
-                }
-                else if (block.size == 1)
-                {
-                    s.pred.verb = block.list[0];
-                    s.pred.advp = TOKENLIST_DEFAULT;
-                }
-                else
-                {
-                    s.pred.verb = block.list[0];
-                    s.pred.advp = (TokenList) {
-                        .list = block.list + 1,
-                        .size = block.size - 1};
-                }
+                *head = buffer.list[0];
             }
-            else if (mode == PHRASE_E)
+            if (buffer.size >= 2)
             {
-                if (block.size == 0)
-                {
-                    s.pred.obj.noun = TOKEN_DEFAULT;
-                    s.pred.obj.adjp = TOKENLIST_DEFAULT;
-                }
-                else if (block.size == 1)
-                {
-                    s.pred.obj.noun = block.list[0];
-                    s.pred.obj.adjp = TOKENLIST_DEFAULT;
-                }
-                else
-                {
-                    s.pred.obj.noun = block.list[0];
-                    s.pred.obj.adjp = (TokenList) {
-                        .list = block.list + 1,
-                        .size = block.size - 1};
-                }
+                *tail = (TokenList) {
+                    .list = buffer.list + 1,
+                    .size = buffer.size - 1};
             }
 
+            // Switch mode, reset buffer
             mode = PHRASE_EN;  // set PHRASE_EN here for next sentence
-            block.list = malloc(10 * sizeof(Token));
-            block.size = 0;
+            buffer.list = malloc(10 * sizeof(Token));
+            buffer.size = 0;
 
+            // Start new sentence
             sl[size] = s;
             s = SENTENCE_DEFAULT;
             ++size;
         }
-        else  // identifiers, literals
+        // Identifiers/Literals, add to the buffer
+        else
         {
-            block.list[block.size] = *p;
-            ++block.size;
+            buffer.list[buffer.size] = *p;
+            ++buffer.size;
         }
-        ++p;
+
+        ++p;  // Go to next Token
     }
 
-    if (block.list != NULL)
+    if (buffer.list != NULL)
     {
-        free(block.list);
+        free(buffer.list);
     }
 
     return (SentenceList) {
@@ -724,7 +811,7 @@ void compile_sentence(Sentence s, SectionData *data, SectionText *text)
         {
             return;  // Do nothing, we have an lone NP
         }
-        else if (is_keyword(s.pred.verb, KEYWORD_SAMA))
+        else if (is_keyword(s.pred.verb, KEYWORD_KAMA))
         {
             if (s.subj.noun.type != TOKEN_IDENTIFIER)
             {
@@ -922,7 +1009,7 @@ for (int i = 0; i < tokens.size; ++i) {
 
 // MAIN
 
-int main(int argc, char *argv[])
+int main(int argc, const char *argv[])
 {
 #if REQUIRE_COMMAND_LINE_ARGS
     // check number of arguments
@@ -975,6 +1062,7 @@ int main(int argc, char *argv[])
             stderr,
             "Something went wrong reading file!"
         );
+        exit(1);
     }
 
     LexemeList lexemes = scan(buffer);

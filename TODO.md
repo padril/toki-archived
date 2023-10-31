@@ -3,12 +3,12 @@
 ## Next Refactor/Cleanup Milestone
 
 - [ ] Functioning variables.toki
-    - [ ] Variables
+    - [x] Variables
     - [ ] Numbers
     - [ ] Operators
         - [ ] Plus operator
             - [ ] On numbers and strings
-    - [ ] Keyword `toki` (for converting to )
+    - [ ] Keyword `toki` (for converting to strings)
 - [ ] Functioning fizzbuzz.toki
     - [ ] Numbers
     - [ ] Modulus operator
