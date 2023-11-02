@@ -12,13 +12,13 @@
 /* Lets the program know if command line arguments are going to be provided,
  * or if the default values should be used. Useful for the debugger.
  */
-#define DEFAULT_INPUT_FILENAME "./examples/hello_var.toki"
-#define DEFAULT_OUTPUT_FILENAME "hello_var"
+#define DEFAULT_INPUT_FILENAME "./test/end_to_end/hello_world_test.toki"
+#define DEFAULT_OUTPUT_FILENAME "a"
 
 /* When set to 1, will delete generated .asm and .obj files. Turn off if
  * you want to keep the files (e.g. to debug ASM code)
  */
-#define DELETE_INTERMEDIATE 1
+#define DELETE_INTERMEDIATE 0
 
 // GRAMMAR DEFINITIONS
 
@@ -911,6 +911,7 @@ void make(const char *outfile)
 void compile(const char *outfile, SentenceList input)
 {
     SectionData *sd = malloc(sizeof(SectionData));
+    sd->literals = 0;
     SectionText *st = malloc(sizeof(SectionData));
 
     sd->lines = malloc(100 * sizeof(const char *));
