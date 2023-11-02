@@ -12,11 +12,8 @@
 /* Lets the program know if command line arguments are going to be provided,
  * or if the default values should be used. Useful for the debugger.
  */
-#define REQUIRE_COMMAND_LINE_ARGS 1
-#if !(REQUIRE_COMMAND_LINE_ARGS)
-    #define DEFAULT_INPUT_FILENAME "./examples/hello_var.toki"
-    #define DEFAULT_OUTPUT_FILENAME "hello_var"
-#endif
+#define DEFAULT_INPUT_FILENAME "./examples/hello_var.toki"
+#define DEFAULT_OUTPUT_FILENAME "hello_var"
 
 /* When set to 1, will delete generated .asm and .obj files. Turn off if
  * you want to keep the files (e.g. to debug ASM code)
@@ -1011,24 +1008,34 @@ for (int i = 0; i < tokens.size; ++i) {
 
 int main(int argc, const char *argv[])
 {
-#if REQUIRE_COMMAND_LINE_ARGS
+    const char *fname;
+    const char *outfname;
+
     // check number of arguments
-    if (argc != 3)
+    if (argc == 3)
+    {
+        fname = argv[1];
+        outfname = argv[2];
+    } 
+    else if (argc == 2)
+    {
+        fname = argv[1];
+        outfname = DEFAULT_OUTPUT_FILENAME;
+    }
+    else if (argc == 1)
+    {
+        fname = DEFAULT_INPUT_FILENAME;
+        outfname = DEFAULT_OUTPUT_FILENAME;
+    }
+    else
     {
         fprintf(
             stderr,
-            "Incorrect number of arguments (expected 2, got %d).\n",
+            "Incorrect number of arguments (expected 0 to 2, got %d).\n",
             argc - 1);
 
         exit(1);
     }
-    // asm file
-    const char *fname = argv[1];
-    const char *outfname = argv[2];
-#else
-    const char *outfname = DEFAULT_OUTPUT_FILENAME;
-    const char *fname = DEFAULT_INPUT_FILENAME;
-#endif
 
     // open file
     FILE *fptr = fopen(fname, "rb");
