@@ -15,7 +15,7 @@
     - [ ] Loops
 - [ ] Implement unit testing
     - [ ] Add unit tests
-- [ ] Implement end-to-end testing
+- [x] Implement end-to-end testing
     - [ ] Add end to end-to-end tests
 - [ ] Implement compile-time errors
     - [ ] Add compile-time errors where they need to be
@@ -42,6 +42,11 @@ cute syntactic sugar for `...` or something?
 - [ ] TAM / *li* vs *o* distinction might go in `Sentence` later.
 - [ ] Some sort of preprocessor will be useful for comments, before the
 scan step.
+- [ ] `IDENTIFIER li kama e LITERAL.` should be `ID li LT.` where a literal can
+act as the verb, to create a copular phrase. Also works for `ID li ID.` for
+assignment, `ID li X PREP Y`, etc. If the 'verb' is an identifier assigned to a
+function, it gets more complicated, but for function calls we would use
+`ID li pali ID e ...`. 
 
 ### Style / Improvements
 
@@ -49,7 +54,7 @@ scan step.
 a function.
 - [ ] Create some type of simple static analysis to ensure enum/string list
 pairs are correctly ordered.
-- [ ] Parsing is overly complicated giving absence of nasin kijete, it should be
+- [x] Parsing is overly complicated giving absence of nasin kijete, it should be
 shortened down. **PRIORITIZE THIS, ITS REALLY BAD**
 - [ ] Literal Tokens kind of suck right now, the first part of "value"
 represents type information, and then the rest represents the actual value. I
@@ -65,6 +70,8 @@ functions, and maybe creating a log file.
 
 ## Long term goals
 
+- [ ] Byte code
+- [ ] REPL
 - [ ] Start documentation
 - [ ] README.md
 - [ ] Add "nasin kijete" (free word order) flag.
