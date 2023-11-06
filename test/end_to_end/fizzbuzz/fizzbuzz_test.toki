@@ -1,0 +1,6 @@
+i li kama e 1.
+tempo i <= 20 la o pali e ni:
+    i kipisi pini 15 li sama e 0 la o sitelen fizzbuzz,
+    ante la i % 3 = 0 la o sitelen fizz,
+    ante la i % 5 = 0 la o sitelen buzz,
+    i li i + 1.
