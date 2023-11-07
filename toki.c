@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <ctype.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,16 +10,16 @@
 
 // FLAG DEFINITIONS
 
-/* Lets the program know if command line arguments are going to be provided,
- * or if the default values should be used. Useful for the debugger.
+/* Gives default arguments, if not provided. Useful for debugging.
  */
-#define DEFAULT_INPUT_FILENAME "./test/end_to_end/hello_world_test.toki"
+#define DEFAULT_INPUT_FILENAME \
+    "./test/end_to_end/hello_world/hello_world_test.toki"
 #define DEFAULT_OUTPUT_FILENAME "a"
 
 /* When set to 1, will delete generated .asm and .obj files. Turn off if
  * you want to keep the files (e.g. to debug ASM code)
  */
-#define DELETE_INTERMEDIATE 0
+#define DELETE_INTERMEDIATE 1
 
 // GRAMMAR DEFINITIONS
 
@@ -320,7 +321,7 @@ LexemeList scan(const char *input)
                 fprintf(stderr,
                         "Unknown lexeme %s at Ln %d, Col %d.\n",
                         *p, ln, col);
-                exit(1);
+                exit(-1);
             }
         }
         else if (mode == TEXT)
@@ -581,14 +582,14 @@ SentenceList parse(TokenList input)
                 fprintf(
                     stderr,
                     "Unimplemented: cannot use multiple predicates");
-                exit(1);
+                exit(-1);
             }
             else if (mode == PHRASE_O)
             {
                 fprintf(
                     stderr,
                     "Unimplemented: cannot conjoin predicates");
-                exit(1);
+                exit(-1);
             }
 
             // Push buffer into sentence
@@ -616,14 +617,14 @@ SentenceList parse(TokenList input)
                 fprintf(
                     stderr,
                     "Prepositions not allowed after verb phrases.");
-                exit(1);
+                exit(-1);
             }
             else if (buffer.size == 0)
             {
                 fprintf(
                     stderr,
                     "Monadic 'sin' is not allowed.");
-                exit(1);
+                exit(-1);
             }
 
             // Push buffer into sentence
@@ -654,7 +655,7 @@ SentenceList parse(TokenList input)
                 fprintf(
                     stderr,
                     "Error, invalid word order SO");
-                exit(1);
+                exit(-1);
                 // wait till nasin kijete flag is implemented!
             }
 
@@ -735,7 +736,7 @@ void compile_sentence(Sentence s, SectionData *data, SectionText *text)
             fprintf(
                 stderr,
                 "Missing verb in sentence.\n");
-            exit(1);
+            exit(-1);
             // else if (declarative) { error }
             // could really be a nice succinct switch statement probably
         }
@@ -798,7 +799,7 @@ void compile_sentence(Sentence s, SectionData *data, SectionText *text)
                 fprintf(
                     stderr,
                     "Incorrect object for verb 'sitelen'.\n");
-                exit(1);
+                exit(-1);
             }
         }
     }
@@ -815,14 +816,14 @@ void compile_sentence(Sentence s, SectionData *data, SectionText *text)
                 fprintf(
                     stderr,
                     "Subject must be identifier in assignment.\n");
-                exit(1);
+                exit(-1);
             }
             if (s.pred.obj.noun.type == TOKEN_NULL)
             {
                 fprintf(
                     stderr,
                     "Assignment statement needs object.\n");
-                exit(1);
+                exit(-1);
             }
 
             // Generate data
@@ -1032,10 +1033,10 @@ int main(int argc, const char *argv[])
     {
         fprintf(
             stderr,
-            "Incorrect number of arguments (expected 0 to 2, got %d).\n",
+            "Incorrect number of arguments (expected 0, 1, or 2, got %d).\n",
             argc - 1);
 
-        exit(1);
+        exit(-1);
     }
 
     // open file
@@ -1046,10 +1047,11 @@ int main(int argc, const char *argv[])
     {
         fprintf(
             stderr,
-            "File \"%s\" not found.\n",
-            fname);
+            "File \"%s\" not found.\n"
+            "  %s",
+            fname, strerror(errno));
 
-        exit(1);
+        exit(-1);
     }
 
     // read file
@@ -1070,7 +1072,7 @@ int main(int argc, const char *argv[])
             stderr,
             "Something went wrong reading file!"
         );
-        exit(1);
+        exit(-1);
     }
 
     LexemeList lexemes = scan(buffer);
