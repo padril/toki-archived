@@ -4,7 +4,7 @@
 
 - [ ] Functioning variables.toki
     - [x] Variables
-    - [ ] Numbers
+    - [x] Numbers
     - [ ] Operators
         - [ ] Plus operator
             - [ ] On numbers and strings
@@ -16,7 +16,7 @@
 - [ ] Implement unit testing
     - [ ] Add unit tests
 - [x] Implement end-to-end testing
-    - [ ] Add end to end-to-end tests
+    - [x] Add end to end-to-end tests
 - [ ] Implement compile-time errors
     - [ ] Add compile-time errors where they need to be
 
@@ -50,16 +50,20 @@ function, it gets more complicated, but for function calls we would use
 
 ### Style / Improvements
 
-- [ ] Compiling is overly verbose, the inputing of ASM should be shortened into
+- [ ] Make types of different literals typedef'd.
+- [x] Compiling is overly verbose, the inputing of ASM should be shortened into
 a function.
 - [ ] Create some type of simple static analysis to ensure enum/string list
 pairs are correctly ordered.
 - [x] Parsing is overly complicated giving absence of nasin kijete, it should be
-shortened down. **PRIORITIZE THIS, ITS REALLY BAD**
+shortened down.
 - [ ] Literal Tokens kind of suck right now, the first part of "value"
 represents type information, and then the rest represents the actual value. I
 feel like this could either be simpler, use less memory, or something else if
 just done better.
+    - [ ] When improving this we almost certainly need to add functionality to
+    identifiers, which currently don't know their own type. 
+    - **Prioritize this**
 - [ ] Remove `Token_default` and `TokenList_default` by using better logic in
 the related sections of the code.
 - [ ] `compile_sentence()` could probably return a struct holding `SectionData`

@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,7 +20,7 @@
 /* When set to 1, will delete generated .asm and .obj files. Turn off if
  * you want to keep the files (e.g. to debug ASM code)
  */
-#define DELETE_INTERMEDIATE 1
+#define DELETE_INTERMEDIATE 0
 
 // GRAMMAR DEFINITIONS
 
@@ -50,7 +51,7 @@ typedef enum Keyword
     KEYWORD_LI,
     KEYWORD_KAMA,
     KEYWORD_SAMA,
-    KEYWORD_SIN,
+    KEYWORD_KIN,
 } Keyword;
 
 const char *KEYWORDS[] = {
@@ -61,7 +62,7 @@ const char *KEYWORDS[] = {
     "li",
     "kama",
     "sama",
-    "sin"
+    "kin"
 };
 
 const int KEYWORD_COUNT = sizeof(KEYWORDS) / sizeof(const char *);
@@ -92,6 +93,8 @@ const int SEPARATOR_COUNT = sizeof(SEPARATORS) / sizeof(const char *);
 typedef enum Literal
 {
     LITERAL_STRING,
+    LITERAL_INTEGER,
+    LITERAL_FLOAT,
 } Literal;
 
 const char *LITERALS[] = {
@@ -272,6 +275,11 @@ static inline bool is_literal(Token t, Literal lt) {
 /* Begins the process of Lexical Analysis by generating a list of Lexemes
  * from the input string.
  * (https://en.wikipedia.org/wiki/Lexical_analysis)
+ * 
+ * Matches:
+ * TEXT   = [a-zA-Z][a-zA-Z0-9]*
+ * NUMBER = [0-9]+(\.[0-9]+)
+ * STRING = ".*"
  */
 LexemeList scan(const char *input)
 {
@@ -280,6 +288,7 @@ LexemeList scan(const char *input)
     {
         UNKNOWN,
         TEXT,
+        NUMBER,
         STRING,
         END,
     } Match;
@@ -315,6 +324,10 @@ LexemeList scan(const char *input)
                 lexemes[lexemes_size] = ".";
                 ++lexemes_size;
                 q = p + 1;
+            }
+            else if (isdigit(*p))
+            {
+                mode = NUMBER;
             }
             else
             {
@@ -375,6 +388,38 @@ LexemeList scan(const char *input)
                 lexemes[lexemes_size] = lex;
                 ++lexemes_size;
 
+                // clean
+                mode = UNKNOWN;
+                q = p + 1; // p will be incremented by one later
+            }
+        }
+        else if (mode == NUMBER)
+        {
+            // When we encounter a period, we need to lookahead to see if there
+            // is another number later
+            if (isdigit(*p) || (*p == '.' && isdigit(*(p + 1))))
+            {
+                ; // continue to next
+            }
+            else
+            {
+                // construct string
+                int str_size = p - q;
+                char *text = malloc((str_size + 1) * sizeof(char));
+                strncpy(text, q, str_size);
+                text[str_size] = '\0';
+
+                // construct token
+                lex = text;
+
+                // add token
+                lexemes[lexemes_size] = lex;
+                ++lexemes_size;
+                if (*p == '.')
+                {
+                    lexemes[lexemes_size] = ".";
+                    ++lexemes_size;
+                }
                 // clean
                 mode = UNKNOWN;
                 q = p + 1; // p will be incremented by one later
@@ -456,7 +501,7 @@ TokenList evaluate(LexemeList input)
 
         // literals
 
-        if (lexemes[lex][0] == '"')
+        if (lexemes[lex][0] == '"')  // string literal
         {
             curr.type = TOKEN_LITERAL;
             const char *p = lexemes[lex] + 1, *q = lexemes[lex] + 1;
@@ -471,6 +516,43 @@ TokenList evaluate(LexemeList input)
             strncpy((char *) ((Literal *) curr.value + 1), q, str_size);
             ((Literal *) curr.value)[0] = LITERAL_STRING;
             ((char *) curr.value)[curr.size] = '\0';
+            tokens[tokens_size] = curr;
+            ++tokens_size;
+            continue;
+        }
+        else if (isdigit(lexemes[lex][0]))  // number literal
+        {
+            curr.type = TOKEN_LITERAL;
+            const char *p = lexemes[lex];
+
+            // is it an integer, or a float?
+            bool integer = true;
+            while (*p)
+            {
+                if (*p == '.')
+                {
+                    integer = false;
+                    break;
+                }
+                ++p;
+            }
+            p = lexemes[lex]; // reset
+
+            if (integer)
+            {
+                curr.size = sizeof(Literal) + sizeof(long long);
+                curr.value = malloc(curr.size);
+                * (long long *) ((Literal *) curr.value + 1) =
+                    strtoll(p, NULL, 10);
+                ((Literal *) curr.value)[0] = LITERAL_INTEGER;
+            }
+            else
+            {
+                curr.size = sizeof(Literal) + sizeof(double);
+                curr.value = malloc(curr.size);
+                * (double *) ((Literal *) curr.value + 1) = strtod(p, NULL);
+                ((Literal *) curr.value)[0] = LITERAL_FLOAT;
+            }
             tokens[tokens_size] = curr;
             ++tokens_size;
             continue;
@@ -609,7 +691,7 @@ SentenceList parse(TokenList input)
             buffer.list = malloc(10 * sizeof(Token));
             buffer.size = 0;
         }
-        else if (is_keyword(*p, KEYWORD_SIN))
+        else if (is_keyword(*p, KEYWORD_KIN))
         {
             // Handle some invalid cases
             if (mode == PHRASE_O)
@@ -723,6 +805,47 @@ SentenceList parse(TokenList input)
 
 // COMPILING
 
+/* These are helper functions which help significantly reduce the necessary code
+ * for inputing lines of ASM into `SectionData` and `SectionText`.
+ */
+void write_into_data(SectionData *data, const char *assembly, ...)
+{
+    // Find final length of formatted string
+    va_list args; 
+    va_list argscopy;
+    va_start(args, assembly); 
+    va_copy(argscopy, args);
+
+    size_t formatted_length = (size_t) vsnprintf(NULL, 0, assembly, args) + 1; 
+
+    char *line = malloc(formatted_length * sizeof(char));
+    vsnprintf(line, formatted_length, assembly, argscopy);
+
+    data->lines[data->size++] = line;
+
+    va_end(args);
+    va_end(argscopy);
+}
+
+void write_into_text(SectionText *text, const char *assembly, ...)
+{
+    // Find final length of formatted string
+    va_list args; 
+    va_list argscopy;
+    va_start(args, assembly); 
+    va_copy(argscopy, args);
+
+    size_t formatted_length = (size_t) vsnprintf(NULL, 0, assembly, args) + 1; 
+
+    char *line = malloc(formatted_length * sizeof(char));
+    vsnprintf(line, formatted_length, assembly, argscopy);
+
+    text->lines[text->size++] = line;
+
+    va_end(args);
+    va_end(argscopy);
+}
+
 /* Inputs data retrieved from `Sentence` into provided `SectionData` and
  * `SectionText` pointers by generating ASM.
  */
@@ -744,55 +867,47 @@ void compile_sentence(Sentence s, SectionData *data, SectionText *text)
         {
             if (s.pred.obj.noun.type == TOKEN_IDENTIFIER)
             {
-                // Generate
-                char *textline1 = malloc(81 * sizeof(char));
-                char *textline2 = malloc(81 * sizeof(char));
-                char *textline3 = malloc(81 * sizeof(char));
-                sprintf(textline1,
-                        "push    VARIABLE_%s",
-                        (char *) s.pred.obj.noun.value);
-                sprintf(textline2,
-                        "call    _printf");
-                sprintf(textline3,
-                        "add     esp, 4");
-                text->lines[text->size] = textline1;
-                ++text->size;
-                text->lines[text->size] = textline2;
-                ++text->size;
-                text->lines[text->size] = textline3;
-                ++text->size;
+                // TODO: what about different types for different idents?
+                // Generate text
+                write_into_text(text, "push    dword VARIABLE_%s",
+                                (char *) s.pred.obj.noun.value);
+                write_into_text(text, "push    dword formatString");
+                write_into_text(text, "call    _printf");
+                write_into_text(text, "add     esp, byte 8");
             }
             else if (is_literal(s.pred.obj.noun, LITERAL_STRING))
             {
                 // Generate data
-                char *dataline = malloc(81 * sizeof(char));
-                sprintf(dataline,
-                        "LITERAL_%d db \"%s\", 0",
-                        data->literals,
-                        (char *) ((Literal *) s.pred.obj.noun.value + 1)
-                        );
-                data->lines[data->size] = dataline;
-                ++data->size;
+                write_into_data(data, "LITERAL_%d db \"%s\", 0",
+                                data->literals,
+                                (char *) ((Literal *) s.pred.obj.noun.value + 1));
 
-                // Generate
-                char *textline1 = malloc(81 * sizeof(char));
-                char *textline2 = malloc(81 * sizeof(char));
-                char *textline3 = malloc(81 * sizeof(char));
-                sprintf(textline1,
-                        "push    LITERAL_%d",
-                        data->literals);
-                sprintf(textline2,
-                        "call    _printf");
-                sprintf(textline3,
-                        "add     esp, 4");
-                text->lines[text->size] = textline1;
-                ++text->size;
-                text->lines[text->size] = textline2;
-                ++text->size;
-                text->lines[text->size] = textline3;
-                ++text->size;
+                // Generate text
+                write_into_text(text, "push    dword LITERAL_%d",
+                                data->literals);
+                write_into_text(text, "push    dword formatString");
+                write_into_text(text, "call    _printf");
+                write_into_text(text, "add     esp, byte 8");
 
                 ++data->literals;
+            }
+            else if (is_literal(s.pred.obj.noun, LITERAL_INTEGER))
+            {
+                write_into_text(text, "push    %d",
+                                * (long long *)
+                                ((Literal *) s.pred.obj.noun.value + 1));
+                write_into_text(text, "push    dword formatInteger");
+                write_into_text(text, "call    _printf");
+                write_into_text(text, "add     esp, byte 8");
+            }
+            else if (is_literal(s.pred.obj.noun, LITERAL_FLOAT))
+            {
+                write_into_text(text, "push    %d",
+                                * (double *)
+                                ((Literal *) s.pred.obj.noun.value + 1));
+                write_into_text(text, "push    dword formatFloat");
+                write_into_text(text, "call    _printf");
+                write_into_text(text, "add     esp, byte 8");
             }
             else
             {
@@ -827,17 +942,30 @@ void compile_sentence(Sentence s, SectionData *data, SectionText *text)
             }
 
             // Generate data
-            char *dataline = malloc(81 * sizeof(char));
             if (is_literal(s.pred.obj.noun, LITERAL_STRING))
             {
-                sprintf(dataline,
-                    "VARIABLE_%s db \"%s\", 0",
+                write_into_data(
+                    data, "VARIABLE_%s db \"%s\", 0",
                     (char *) s.subj.noun.value,
                     (char *) ((Literal *) s.pred.obj.noun.value + 1)
-                );
+                    );
             }
-            data->lines[data->size] = dataline;
-            ++data->size;
+            else if (is_literal(s.pred.obj.noun, LITERAL_INTEGER))
+            {
+                write_into_data(
+                    data, "VARIABLE_%s dq %d",
+                    (char *) s.subj.noun.value,
+                    * (long long *) ((Literal *) s.pred.obj.noun.value + 1)
+                    );
+            }
+            else if (is_literal(s.pred.obj.noun, LITERAL_FLOAT))
+            {
+                write_into_data(
+                    data, "VARIABLE_%s dq %f",
+                    (char *) s.subj.noun.value,
+                    * (double *) ((Literal *) s.pred.obj.noun.value + 1)
+                    );
+            }
         }
     }
 }
@@ -851,6 +979,17 @@ void write(const char *outfile, const SectionData *sd, const SectionText *st)
     strcat(fname, ".asm");
 
     FILE *fptr = fopen(fname, "w");
+
+    if (fptr == NULL)
+    {
+        fprintf(
+            stderr,
+            "Failed to create ASM file.\n"
+            "  %s",
+            strerror(errno));
+
+        exit(-1);
+    }
 
     // opening boilerplate
     fprintf(fptr,
@@ -871,7 +1010,10 @@ void write(const char *outfile, const SectionData *sd, const SectionText *st)
 
     // .data boilerplate
     fprintf(fptr,
-            "section .data\n");
+            "section .data\n"
+            "    formatString db \"%%s\", 10, 0\n"
+            "    formatInteger db \"%%d\", 10, 0\n"
+            "    formatFloat db \"%%f\", 10, 0\n");
 
     // .data:
     for (int i = 0; i < sd->size; ++i)
@@ -911,6 +1053,7 @@ void make(const char *outfile)
  */
 void compile(const char *outfile, SentenceList input)
 {
+
     SectionData *sd = malloc(sizeof(SectionData));
     sd->literals = 0;
     SectionText *st = malloc(sizeof(SectionData));
@@ -1033,10 +1176,11 @@ int main(int argc, const char *argv[])
     {
         fprintf(
             stderr,
-            "Incorrect number of arguments (expected 0, 1, or 2, got %d).\n",
+            "Incorrect number of arguments (expected 0, 1, or 2, got %d)."
+            "Setting arguments to defaults and continuing\n",
             argc - 1);
-
-        exit(-1);
+        fname = DEFAULT_INPUT_FILENAME;
+        outfname = DEFAULT_OUTPUT_FILENAME;
     }
 
     // open file
