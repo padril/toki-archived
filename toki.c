@@ -92,16 +92,26 @@ const int SEPARATOR_COUNT = sizeof(SEPARATORS) / sizeof(const char *);
  */
 typedef enum Literal
 {
+    LITERAL_NULL,
     LITERAL_STRING,
     LITERAL_INTEGER,
     LITERAL_FLOAT,
 } Literal;
 
 const char *LITERALS[] = {
+    "Null",
     "String",
+    "Integer",
+    "Float",
 };
 
 const int LITERAL_COUNT = sizeof(LITERALS) / sizeof(const char *);
+
+typedef void NullLiteralType;
+typedef char CharLiteralType;  // I dont like how I do this one, so TODO ig
+typedef CharLiteralType* StringLiteralType;
+typedef long long IntegerLiteralType;  // These use strto methods in the code
+typedef double FloatLiteralType;       // make sure to update those too
 
 /* Tokens are the base unit of the program's grammar. They store a type as
  * a `TokenType`, a value, and a size of that value in bytes. They are
@@ -126,11 +136,11 @@ typedef struct Token
 {
     TokenType type;
     void *value;
-    size_t size;
+    Literal literal;
 } Token;
 
 #define TOKEN_DEFAULT ((Token) {\
-    .type = TOKEN_NULL, .size = 0, .value = NULL\
+    .type = TOKEN_NULL, .literal = LITERAL_NULL, .value = NULL\
 })
 
 typedef struct TokenList
@@ -267,7 +277,7 @@ static inline bool is_seperator(Token t, Separator sp) {
 
 static inline bool is_literal(Token t, Literal lt) {
     return (t.type == TOKEN_LITERAL) &&
-           (* (Literal *) t.value == lt);
+           (t.literal == lt);
 }
 
 // LEXICAL ANALYSIS
@@ -439,6 +449,7 @@ LexemeList scan(const char *input)
 TokenList evaluate(LexemeList input)
 {
     Lexeme *lexemes = input.list;
+    // TODO: This shouldn't be static
     Token *tokens = malloc(100 * sizeof(Token));
     size_t tokens_size = 0;
 
@@ -454,9 +465,8 @@ TokenList evaluate(LexemeList input)
             if (!strcmp(lexemes[lex], KEYWORDS[kw]))
             {
                 curr.type = TOKEN_KEYWORD;
-                curr.size = sizeof(Keyword);
-                curr.value = malloc(curr.size);
-                *(Keyword *) curr.value = (Keyword) kw;
+                curr.value = malloc(sizeof(Keyword));
+                * (Keyword *) curr.value = (Keyword) kw;
                 break;
             }
         }
@@ -490,10 +500,10 @@ TokenList evaluate(LexemeList input)
         if (ident)
         {
             curr.type = TOKEN_IDENTIFIER;
-            curr.size = sizeof(char) * strlen(lexemes[lex]);
-            curr.value = malloc(curr.size);
-            strncpy((char *) curr.value, lexemes[lex], curr.size);
-            ((char *) curr.value)[curr.size] = '\0';
+            size_t size = sizeof(char) * strlen(lexemes[lex]);
+            curr.value = malloc(size);
+            strncpy((char *) curr.value, lexemes[lex], size);
+            ((char *) curr.value)[size] = '\0';
             tokens[tokens_size] = curr;
             ++tokens_size;
             continue;
@@ -510,12 +520,11 @@ TokenList evaluate(LexemeList input)
                 ++p;
             }
             int str_size = p - q; // no +1 to get rid of end quote
-            // +1 to make room for type byte
-            curr.size = sizeof(Literal) + (str_size) * sizeof(char);
-            curr.value = malloc(curr.size);
-            strncpy((char *) ((Literal *) curr.value + 1), q, str_size);
-            ((Literal *) curr.value)[0] = LITERAL_STRING;
-            ((char *) curr.value)[curr.size] = '\0';
+            size_t size = (str_size) * sizeof(CharLiteralType);
+            curr.value = malloc(size);
+            strncpy((StringLiteralType) curr.value, q, str_size);
+            curr.literal = LITERAL_STRING;
+            ((StringLiteralType) curr.value)[size] = '\0';
             tokens[tokens_size] = curr;
             ++tokens_size;
             continue;
@@ -540,18 +549,15 @@ TokenList evaluate(LexemeList input)
 
             if (integer)
             {
-                curr.size = sizeof(Literal) + sizeof(long long);
-                curr.value = malloc(curr.size);
-                * (long long *) ((Literal *) curr.value + 1) =
-                    strtoll(p, NULL, 10);
-                ((Literal *) curr.value)[0] = LITERAL_INTEGER;
+                curr.value = malloc(sizeof(IntegerLiteralType));
+                * (long long *) curr.value = strtoll(p, NULL, 10);
+                curr.literal = LITERAL_INTEGER;
             }
             else
             {
-                curr.size = sizeof(Literal) + sizeof(double);
-                curr.value = malloc(curr.size);
-                * (double *) ((Literal *) curr.value + 1) = strtod(p, NULL);
-                ((Literal *) curr.value)[0] = LITERAL_FLOAT;
+                curr.value = malloc(sizeof(FloatLiteralType));
+                * (double *) curr.value = strtod(p, NULL);
+                curr.literal = LITERAL_FLOAT;
             }
             tokens[tokens_size] = curr;
             ++tokens_size;
@@ -565,8 +571,7 @@ TokenList evaluate(LexemeList input)
             if (!strcmp(lexemes[lex], SEPARATORS[sp]))
             {
                 curr.type = TOKEN_SEPARATOR;
-                curr.size = sizeof(Separator);
-                curr.value = malloc(curr.size);
+                curr.value = malloc(sizeof(Separator));
                 * (Separator *) curr.value = (Separator)sp;
                 break;
             }
@@ -880,7 +885,7 @@ void compile_sentence(Sentence s, SectionData *data, SectionText *text)
                 // Generate data
                 write_into_data(data, "LITERAL_%d db \"%s\", 0",
                                 data->literals,
-                                (char *) ((Literal *) s.pred.obj.noun.value + 1));
+                                (StringLiteralType) s.pred.obj.noun.value);
 
                 // Generate text
                 write_into_text(text, "push    dword LITERAL_%d",
@@ -894,8 +899,7 @@ void compile_sentence(Sentence s, SectionData *data, SectionText *text)
             else if (is_literal(s.pred.obj.noun, LITERAL_INTEGER))
             {
                 write_into_text(text, "push    %d",
-                                * (long long *)
-                                ((Literal *) s.pred.obj.noun.value + 1));
+                                * (IntegerLiteralType *) s.pred.obj.noun.value);
                 write_into_text(text, "push    dword formatInteger");
                 write_into_text(text, "call    _printf");
                 write_into_text(text, "add     esp, byte 8");
@@ -903,8 +907,7 @@ void compile_sentence(Sentence s, SectionData *data, SectionText *text)
             else if (is_literal(s.pred.obj.noun, LITERAL_FLOAT))
             {
                 write_into_text(text, "push    %d",
-                                * (double *)
-                                ((Literal *) s.pred.obj.noun.value + 1));
+                                * (FloatLiteralType *) s.pred.obj.noun.value);
                 write_into_text(text, "push    dword formatFloat");
                 write_into_text(text, "call    _printf");
                 write_into_text(text, "add     esp, byte 8");
@@ -947,7 +950,7 @@ void compile_sentence(Sentence s, SectionData *data, SectionText *text)
                 write_into_data(
                     data, "VARIABLE_%s db \"%s\", 0",
                     (char *) s.subj.noun.value,
-                    (char *) ((Literal *) s.pred.obj.noun.value + 1)
+                    (StringLiteralType) s.pred.obj.noun.value
                     );
             }
             else if (is_literal(s.pred.obj.noun, LITERAL_INTEGER))
@@ -955,7 +958,7 @@ void compile_sentence(Sentence s, SectionData *data, SectionText *text)
                 write_into_data(
                     data, "VARIABLE_%s dq %d",
                     (char *) s.subj.noun.value,
-                    * (long long *) ((Literal *) s.pred.obj.noun.value + 1)
+                    * (IntegerLiteralType *) s.pred.obj.noun.value
                     );
             }
             else if (is_literal(s.pred.obj.noun, LITERAL_FLOAT))
@@ -963,7 +966,7 @@ void compile_sentence(Sentence s, SectionData *data, SectionText *text)
                 write_into_data(
                     data, "VARIABLE_%s dq %f",
                     (char *) s.subj.noun.value,
-                    * (double *) ((Literal *) s.pred.obj.noun.value + 1)
+                    * (FloatLiteralType *) s.pred.obj.noun.value
                     );
             }
         }
